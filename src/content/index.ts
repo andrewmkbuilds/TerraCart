@@ -48,8 +48,7 @@ function init() {
   runInitialDetection()
   // Watch for page changes (SPA navigation)
   observePageChanges()
-  // Report ready
-  reportReady()
+  // reportReady() is called from activateTerraCart() — only for e-commerce sites
 }
 
 // ---- Initial Detection ----
