@@ -1,0 +1,159 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  body {
+    @apply font-sans text-gray-900 antialiased;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}
+
+@layer components {
+  .terra-card {
+    @apply bg-white rounded-xl border border-gray-100 shadow-sm;
+  }
+
+  .terra-btn-primary {
+    @apply bg-terra-600 hover:bg-terra-700 text-white font-medium px-4 py-2 rounded-lg transition-all duration-200 active:scale-95;
+  }
+
+  .terra-btn-secondary {
+    @apply bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium px-4 py-2 rounded-lg transition-all duration-200 active:scale-95;
+  }
+
+  .terra-btn-outline {
+    @apply border border-gray-200 hover:bg-gray-50 text-gray-600 font-medium px-3 py-1.5 rounded-lg transition-all duration-200 text-sm;
+  }
+
+  .terra-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .terra-section {
+    @apply border-b border-gray-100 pb-4 mb-4;
+  }
+
+  .terra-section:last-child {
+    @apply border-b-0 pb-0 mb-0;
+  }
+
+  .terra-label {
+    @apply text-xs font-semibold text-gray-400 uppercase tracking-wider;
+  }
+
+  .terra-value {
+    @apply text-sm text-gray-700;
+  }
+
+  .terra-chip {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-gray-50 text-gray-600 border border-gray-100;
+  }
+
+  .terra-chip-active {
+    @apply bg-terra-50 text-terra-700 border-terra-200;
+  }
+
+  .terra-input {
+    @apply w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-terra-500 focus:border-terra-500 transition-all;
+  }
+
+  .terra-checkbox {
+    @apply w-4 h-4 rounded border-gray-300 text-terra-600 focus:ring-terra-500 transition-all;
+  }
+
+  .terra-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .terra-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .terra-scroll::-webkit-scrollbar-thumb {
+    @apply bg-gray-200 rounded-full;
+  }
+  
+  .terra-scroll::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-300;
+  }
+
+  .terra-research-step {
+    @apply flex items-center gap-2 py-1.5 text-sm;
+  }
+
+  .terra-research-step-complete {
+    @apply text-terra-600;
+  }
+
+  .terra-research-step-pending {
+    @apply text-gray-400;
+  }
+
+  .terra-research-step-active {
+    @apply text-ocean-600 font-medium;
+  }
+
+  .terra-float-btn {
+    @apply fixed z-[2147483647] shadow-lg rounded-full transition-all duration-300;
+    bottom: 24px;
+    right: 24px;
+    width: 52px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 24px;
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    border: 3px solid white;
+    box-shadow: 0 4px 14px rgba(22, 163, 74, 0.4);
+  }
+
+  .terra-float-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 20px rgba(22, 163, 74, 0.5);
+  }
+
+  .confidence-high {
+    @apply text-terra-600 bg-terra-50;
+  }
+
+  .confidence-medium {
+    @apply text-sand-700 bg-sand-50;
+  }
+
+  .confidence-low {
+    @apply text-gray-500 bg-gray-50;
+  }
+
+  .chat-bubble-user {
+    @apply bg-terra-600 text-white rounded-2xl rounded-br-md px-4 py-2.5 max-w-[85%] ml-auto;
+  }
+
+  .chat-bubble-assistant {
+    @apply bg-gray-100 text-gray-800 rounded-2xl rounded-bl-md px-4 py-2.5 max-w-[85%];
+  }
+
+  .terra-disabled {
+    @apply opacity-50 pointer-events-none;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

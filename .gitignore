@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.freebuff/
+*.log
+*.log.err
+.DS_Store
+Thumbs.db
+.env
+.env.local
