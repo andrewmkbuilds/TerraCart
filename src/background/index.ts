@@ -280,23 +280,24 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     }
 
     case 'GEMINI_ANALYZE': {
-      // Analyze a product using Gemini
       const product = message.product as Product
       const preferences = message.preferences as UserPreferences
       if (!product) {
         sendResponse({ error: 'No product provided' })
         return false
       }
+      console.log('TerraCart BG: Starting GEMINI_ANALYZE for', product.name)
       analyzeProductWithGemini(product, preferences).then(result => {
+        console.log('TerraCart BG: GEMINI_ANALYZE result:', result.error || 'success')
         sendResponse(result)
       }).catch((err: unknown) => {
+        console.error('TerraCart BG: GEMINI_ANALYZE failed:', err)
         sendResponse({ analysis: null, sources: [], error: String(err) })
       })
       return true
     }
 
     case 'GEMINI_RESEARCH': {
-      // Research alternatives using Gemini + web search
       const rProduct = message.product as Product
       const rPrefs = message.preferences as UserPreferences
       const rType = message.researchType as 'alternatives' | 'reusable' | 'packaging' | 'all'
@@ -304,16 +305,18 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         sendResponse({ error: 'No product provided' })
         return false
       }
+      console.log('TerraCart BG: Starting GEMINI_RESEARCH for', rProduct.name, 'type:', rType)
       researchAlternativesWithGemini(rProduct, rPrefs, rType || 'all').then(result => {
+        console.log('TerraCart BG: GEMINI_RESEARCH result:', result.error || 'success', 'alternatives:', result.research?.alternatives?.length || 0)
         sendResponse(result)
       }).catch((err: unknown) => {
+        console.error('TerraCart BG: GEMINI_RESEARCH failed:', err)
         sendResponse({ research: null, sources: [], searchQueries: [], error: String(err) })
       })
       return true
     }
 
     case 'GEMINI_CHAT': {
-      // Chat with Gemini
       const chatProduct = message.product as Product | null
       const chatPrefs = message.preferences as UserPreferences
       const chatMsg = message.message as string
@@ -322,9 +325,12 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
         sendResponse({ content: 'No message provided', sources: [] })
         return false
       }
+      console.log('TerraCart BG: Starting GEMINI_CHAT')
       chatWithGemini(chatMsg, chatProduct, chatPrefs, chatHistory).then(result => {
+        console.log('TerraCart BG: GEMINI_CHAT result:', result.content?.slice(0, 100) || 'empty')
         sendResponse(result)
       }).catch((err: unknown) => {
+        console.error('TerraCart BG: GEMINI_CHAT failed:', err)
         sendResponse({ content: 'Error: ' + String(err), sources: [] })
       })
       return true

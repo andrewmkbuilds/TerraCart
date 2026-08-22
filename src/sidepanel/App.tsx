@@ -23,15 +23,37 @@ type Tab = 'overview' | 'alternatives' | 'packaging' | 'checklist' | 'chat'
 type Panel = 'sidepanel' | 'settings' | 'history'
 
 // ---- Helper: send message to background ----
-function sendMessage(message: Record<string, unknown>): Promise<any> {
+function sendMessage(message: Record<string, unknown>, timeoutMs = 30000): Promise<any> {
   return new Promise((resolve) => {
+    let resolved = false
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        console.warn('TerraCart: sendMessage timed out for', message.type)
+        resolve(null)
+      }
+    }, timeoutMs)
+
     try {
       chrome.runtime?.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) resolve(null)
-        else resolve(response)
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timer)
+          if (chrome.runtime.lastError) {
+            console.warn('TerraCart: sendMessage error for', message.type, chrome.runtime.lastError.message)
+            resolve(null)
+          } else {
+            resolve(response)
+          }
+        }
       })
-    } catch {
-      resolve(null)
+    } catch (err) {
+      if (!resolved) {
+        resolved = true
+        clearTimeout(timer)
+        console.warn('TerraCart: sendMessage exception for', message.type, err)
+        resolve(null)
+      }
     }
   })
 }
@@ -696,21 +718,19 @@ function ResearchAlternativesButton({
     setError(null)
     setResearchStatus([])
 
-    const statusSteps = [
-      'Understanding current product...',
-      'Generating research queries...',
-      'Searching the web for alternatives...',
-      'Finding reusable options...',
-      'Checking packaging alternatives...',
-      'Comparing real products...',
-      'Analyzing findings...',
-      'Preparing recommendation...',
-    ]
+    setResearchStatus(['Connecting to Gemini AI...'])
 
-    for (let i = 0; i < statusSteps.length; i++) {
-      await new Promise(r => setTimeout(r, 400 + Math.random() * 300))
-      setResearchStatus(prev => [...prev, statusSteps[i]])
-    }
+    // Show real progress at intervals while API call is in-flight
+    const timers: ReturnType<typeof setTimeout>[] = []
+    timers.push(setTimeout(() => {
+      setResearchStatus(prev => [...prev, 'Searching the web for alternatives...'])
+    }, 2000))
+    timers.push(setTimeout(() => {
+      setResearchStatus(prev => [...prev, 'Analyzing findings...'])
+    }, 5000))
+    timers.push(setTimeout(() => {
+      setResearchStatus(prev => [...prev, 'Preparing recommendations...'])
+    }, 8000))
 
     try {
       const result = await sendMessage({
@@ -720,13 +740,19 @@ function ResearchAlternativesButton({
         researchType: 'all',
       })
 
-      if (result?.error) {
+      if (!result) {
+        setError('No response from background. Make sure the extension is fully loaded — try disabling and re-enabling TerraCart in chrome://extensions/.')
+        setIsResearching(false)
+        return
+      }
+
+      if (result.error) {
         setError(result.error)
         setIsResearching(false)
         return
       }
 
-      if (result?.research) {
+      if (result.research) {
         // Convert Gemini research results into Alternative objects
         const alternatives: Alternative[] = []
 
@@ -817,11 +843,19 @@ function ResearchAlternativesButton({
           })
         }
 
-        onComplete()
+        if (alternatives.length === 0) {
+          setError('Gemini responded but found no alternatives for this product. Try re-analyzing the product first, then research again.')
+        } else {
+          onComplete()
+        }
+      } else if (result && !result.error && !result.research) {
+        setError('Gemini returned an unexpected response. The research feature may be temporarily unavailable. Check the browser console for details.')
       }
-    } catch (err) {
-      setError(String(err))
+    } catch (err: any) {
+      console.error('TerraCart: handleResearch exception:', err)
+      setError('Research failed: ' + (err?.message || String(err)))
     } finally {
+      timers.forEach(t => clearTimeout(t))
       setIsResearching(false)
     }
   }
