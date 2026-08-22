@@ -180,7 +180,11 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         const tab = tabs[0]
         if (!tab?.id) {
-          sendResponse(null)
+          sendResponse({ error: 'No active tab found' })
+          return
+        }
+        if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('edge://'))) {
+          sendResponse({ error: 'Cannot scan browser pages. Navigate to a website first.' })
           return
         }
         try {
@@ -191,18 +195,18 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
               else resolve(r)
             })
           })
-          if (result) {
+          if (result && !result.error) {
             sendResponse(result)
           } else {
             // Content script not loaded — inject it programmatically
-            console.log('TerraCart BG: Content script not found, injecting...')
+            console.log('TerraCart BG: Content script not responding, injecting...')
             try {
               await chrome.scripting.executeScript({
                 target: { tabId: tab.id! },
                 files: ['content.js'],
               })
               // Wait for script to initialize
-              await new Promise(r => setTimeout(r, 300))
+              await new Promise(r => setTimeout(r, 500))
               // Retry scan
               const retryResult = await new Promise<any>((resolve) => {
                 chrome.tabs.sendMessage(tab.id!, { type: 'SCAN_PAGE' }, (r) => {
@@ -210,15 +214,41 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
                   else resolve(r)
                 })
               })
-              sendResponse(retryResult)
+              if (retryResult && !retryResult.error) {
+                sendResponse(retryResult)
+              } else {
+                // If still no product, return an empty result so the sidepanel shows feedback
+                sendResponse({
+                  type: 'other',
+                  products: [],
+                  primaryProduct: null,
+                  retailer: new URL(tab.url || 'about:blank').hostname,
+                  pageTitle: tab.title || '',
+                  timestamp: Date.now(),
+                })
+              }
             } catch (injectErr) {
               console.error('TerraCart BG: Failed to inject content script:', injectErr)
-              sendResponse(null)
+              sendResponse({
+                error: 'Could not scan this page. Try refreshing the page and scanning again.',
+                type: 'other',
+                products: [],
+                retailer: '',
+                pageTitle: tab.title || '',
+                timestamp: Date.now(),
+              })
             }
           }
         } catch (err) {
           console.error('TerraCart BG: SCAN_PAGE failed:', err)
-          sendResponse(null)
+          sendResponse({
+            error: 'Scan failed: ' + String(err),
+            type: 'other',
+            products: [],
+            retailer: '',
+            pageTitle: tab.title || '',
+            timestamp: Date.now(),
+          })
         }
       })
       return true

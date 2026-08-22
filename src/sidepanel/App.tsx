@@ -129,6 +129,9 @@ export function App() {
         }
       }
       const scanResult = await sendMessage({ type: 'SCAN_PAGE' })
+      if (scanResult?.error) {
+        setGeminiError(scanResult.error)
+      }
       if (scanResult) {
         handleScanResult(scanResult)
       }
