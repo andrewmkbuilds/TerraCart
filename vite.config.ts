@@ -2,10 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { writeFileSync, mkdirSync, cpSync, existsSync } from 'fs'
-import { config as loadDotenv } from 'dotenv'
 
-// Load .env file (for local dev); on Vercel, env vars come from process.env
-loadDotenv()
 
 // Simple plugin to copy static assets after build
 function copyStaticAssets() {
