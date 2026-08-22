@@ -109,6 +109,7 @@ export function App() {
 
   const requestScan = async () => {
     setIsScanning(true)
+    setGeminiError(null)
     try {
       const tabInfo = await sendMessage({ type: 'GET_CURRENT_TAB' })
       if (tabInfo) {
@@ -119,61 +120,68 @@ export function App() {
         const enabled = await sendMessage({ type: 'CHECK_WEBSITE_ENABLED', url: tabInfo.url })
         setWebsiteEnabled(enabled?.enabled ?? true)
       }
+      // Try cached data first
       const cachedData = await sendMessage({ type: 'GET_ALL_TAB_SCAN_DATA' })
-      if (cachedData) {
-        const tabId = tabInfo?.id
-        if (tabId && cachedData[tabId]) {
-          handleScanData(cachedData[tabId])
+      if (cachedData && tabInfo?.id && cachedData[tabInfo.id]) {
+        const cached = cachedData[tabInfo.id] as any
+        if (cached.primaryProduct || (cached.products && cached.products.length > 0)) {
+          handleScanData(cached)
           setIsScanning(false)
           return
         }
       }
+      // Fresh scan
       const scanResult = await sendMessage({ type: 'SCAN_PAGE' })
-      if (scanResult?.error) {
+      if (!scanResult) {
+        setGeminiError('No response from background service. Try reloading the extension in chrome://extensions/.')
+      } else if (scanResult.error) {
         setGeminiError(scanResult.error)
-      }
-      if (scanResult) {
+      } else {
         handleScanResult(scanResult)
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('TerraCart: Scan request failed', err)
+      setGeminiError('Scan failed: ' + (err?.message || String(err)))
     } finally {
       setIsScanning(false)
     }
   }
 
   const handleScanData = (data: any) => {
+    if (!data) return
     if (data.primaryProduct) {
       setDetectedProduct(data.primaryProduct)
       setPageScanResult({
         type: 'product-page',
         products: [data.primaryProduct],
         primaryProduct: data.primaryProduct,
-        retailer: data.retailer,
-        pageTitle: data.pageTitle,
+        retailer: data.retailer || '',
+        pageTitle: data.pageTitle || '',
         timestamp: Date.now(),
       })
       analyzeProduct(data.primaryProduct)
-    } else if (data.productCount > 0) {
+    } else if ((data.productCount || 0) > 0) {
       setPageScanResult({
         type: 'search-results',
         products: [],
-        retailer: data.retailer,
-        pageTitle: data.pageTitle,
+        retailer: data.retailer || '',
+        pageTitle: data.pageTitle || '',
         timestamp: Date.now(),
         searchQuery: data.searchQuery,
       })
     }
   }
 
-  const handleScanResult = (result: PageScanResult) => {
+  const handleScanResult = (result: any) => {
+    if (!result) return
+    const products = result.products || []
     setPageScanResult(result)
     if (result.primaryProduct) {
       setDetectedProduct(result.primaryProduct)
       analyzeProduct(result.primaryProduct)
-    } else if (result.products.length > 0) {
-      setDetectedProduct(result.products[0])
-      analyzeProduct(result.products[0])
+    } else if (products.length > 0) {
+      setDetectedProduct(products[0])
+      analyzeProduct(products[0])
     }
   }
 
