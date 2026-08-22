@@ -128,25 +128,27 @@ if ((window as any).__terracartInitialized) {
     } catch {
       return false
     }
-  }
-
-  // ---- Initial Detection ----
+  }  // ---- Initial Detection ----
   function runInitialDetection() {
     const url = window.location.href
+    console.log('TerraCart: runInitialDetection called for', url)
 
     // CRITICAL: Check blocklist FIRST - before any other detection
     if (isBlocklistedUrl(url)) {
+      console.log('TerraCart: URL is blocklisted, staying inactive')
       // Do nothing - TerraCart stays completely inactive
       return
     }
 
     // Fast path: known shopping domain
     if (isKnownShoppingSite(url)) {
+      console.log('TerraCart: Known shopping site detected')
       activateTerraCart('known-domain')
       // Delay scan to let SPA frameworks render product elements
       scheduleScanDelayed(2000)
       return
     }
+
 
     // Full e-commerce detection — wait for DOM to settle
     setTimeout(() => {
@@ -157,6 +159,7 @@ if ((window as any).__terracartInitialized) {
       
       const detection = detectECommerceSite(document, url)
       lastDetection = detection
+      console.log('TerraCart: E-commerce detection result:', detection)
       if (detection.isECommerce && detection.confidence >= 60) {
         activateTerraCart('detected', detection)
         scheduleScanDelayed(2000)
@@ -204,7 +207,9 @@ if ((window as any).__terracartInitialized) {
   // ---- Page Scanning ----
   function performScan(): PageScanResult {
     try {
+      console.log('TerraCart: performScan called')
       const result = scanPage(document, window.location.href)
+      console.log('TerraCart: Scan result:', result)
       lastScanResult = result
 
       const hasProduct = result.type === 'product-page' && result.primaryProduct

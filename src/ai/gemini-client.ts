@@ -140,7 +140,7 @@ export function buildSearchGroundedRequest(
         parts: [{ text: userMessage }],
       },
     ],
-    tools: [{ google_search: {} }],
+    tools: [{ googleSearch: {} }],
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 8192,
@@ -197,7 +197,7 @@ export function buildConversationalRequest(
       parts: [{ text: systemPrompt }],
     },
     contents,
-    tools: [{ google_search: {} }],
+    tools: [{ googleSearch: {} }],
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 8192,

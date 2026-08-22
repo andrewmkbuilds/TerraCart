@@ -20,7 +20,8 @@ export type GeminiPart =
   | { inlineData: { mimeType: string; data: string } }
 
 export interface GeminiTool {
-  google_search: Record<string, never>
+  googleSearch?: Record<string, never>
+  google_search?: Record<string, never>
 }
 
 export interface GeminiGenerationConfig {
@@ -102,16 +103,14 @@ export interface GeminiResearchResult {
     brand: string
     retailer: string
     price: string
-    productUrl: string
-    sourceUrl: string
+    url: string
     reason: string
     ecoScore: number | null
     characteristics: string[]
   }>
   packagingAlternatives: Array<{
     description: string
-    productUrl: string
-    sourceUrl: string
+    url: string
     retailer: string
   }>
   reusableAlternatives: Array<{
@@ -119,8 +118,7 @@ export interface GeminiResearchResult {
     brand: string
     retailer: string
     price: string
-    productUrl: string
-    sourceUrl: string
+    url: string
     reason: string
   }>
   summary: string

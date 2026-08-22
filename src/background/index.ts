@@ -167,6 +167,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } else {
           updateBadgeForTab(sender.tab.id, 'active')
         }
+        // CRITICAL: Broadcast scan results to all extension views (side panel, popup)
+        // so the side panel's PAGE_SCANNED listener receives the data in real time.
+        chrome.runtime.sendMessage({
+          type: 'PAGE_SCANNED',
+          data: message.data,
+          tabId: sender.tab.id,
+        }).catch(() => { /* no side panel open — ignore */ })
       }
       sendResponse({ success: true })
       return false
@@ -195,33 +202,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (tab.url && /^(chrome|chrome-extension|about|edge):/.test(tab.url)) {
           sendResponse(emptyResult('Cannot scan browser pages')); return
         }
+        if (tab.url && isBlocklistedUrl(tab.url)) {
+          sendResponse(emptyResult('Non-shopping site')); return
+        }
         const tabId = tab.id
         const tabUrl = tab.url || ''
         const tabTitle = tab.title || ''
         const hostname = tabUrl ? new URL(tabUrl).hostname : ''
-        // Safety timeout — always respond within 5s
+
+        // Return cached scan data if fresh (< 10 seconds old)
+        const cached = tabScanData.get(tabId) as any
+        if (cached && cached.timestamp && (Date.now() - cached.timestamp < 10000) && (cached.primaryProduct || cached.productCount > 0)) {
+          sendResponse(cached)
+          return
+        }
+
+        // Safety timeout — always respond within 8s
         let responded = false
         const safeRespond = (data: any) => {
           if (!responded) { responded = true; sendResponse(data) }
         }
-        setTimeout(() => safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle }), 5000)
+        setTimeout(() => safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle }), 8000)
 
-        // Try content script
+        // Try content script (already injected)
         chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (result) => {
           if (!responded && !chrome.runtime.lastError && result) {
+            // Store result in cache
+            if (result.type !== 'other' || result.primaryProduct) {
+              tabScanData.set(tabId, { ...result, timestamp: Date.now() })
+            }
             safeRespond(result)
           } else if (!responded) {
-            // Content script not loaded — inject it
+            // Content script not loaded — inject it then wait for it to initialize
             chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }).then(() => {
+              // Give the content script 2s to call init() and set up listeners
               setTimeout(() => {
                 chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (retryResult) => {
                   if (!responded && !chrome.runtime.lastError && retryResult) {
+                    if (retryResult.type !== 'other' || retryResult.primaryProduct) {
+                      tabScanData.set(tabId, { ...retryResult, timestamp: Date.now() })
+                    }
                     safeRespond(retryResult)
                   } else if (!responded) {
                     safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
                   }
                 })
-              }, 800)
+              }, 2000)
             }).catch(() => {
               safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
             })

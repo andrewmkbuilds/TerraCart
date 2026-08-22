@@ -100,6 +100,8 @@ export function App() {
   useEffect(() => {
     const listener = (message: any) => {
       if (message.type === 'PAGE_SCANNED' && message.data) {
+        // Don't replace an existing analysis mid-flight
+        if (isAnalyzing) return
         handleScanData(message.data)
       }
     }
@@ -107,13 +109,15 @@ export function App() {
     return () => {
       chrome.runtime?.onMessage?.removeListener(listener)
     }
-  }, [])
+  }, [isAnalyzing])
 
   const requestScan = async () => {
+    console.log('TerraCart: requestScan called')
     setIsScanning(true)
     setGeminiError(null)
     try {
       const tabInfo = await sendMessage({ type: 'GET_CURRENT_TAB' })
+      console.log('TerraCart: Current tab:', tabInfo)
       if (tabInfo) {
         setCurrentUrl(tabInfo.url || '')
         setCurrentTitle(tabInfo.title || '')
@@ -122,22 +126,30 @@ export function App() {
         const enabled = await sendMessage({ type: 'CHECK_WEBSITE_ENABLED', url: tabInfo.url })
         setWebsiteEnabled(enabled?.enabled ?? true)
       }
-      // Try cached data first
+      // Try cached data first — note: JSON object keys are strings, tab IDs are numbers
       const cachedData = await sendMessage({ type: 'GET_ALL_TAB_SCAN_DATA' })
-      if (cachedData && tabInfo?.id && cachedData[tabInfo.id]) {
-        const cached = cachedData[tabInfo.id] as any
-        if (cached.primaryProduct || (cached.products && cached.products.length > 0)) {
+      console.log('TerraCart: Cached data:', cachedData)
+      if (cachedData && tabInfo?.id) {
+        const cached = cachedData[tabInfo.id] || cachedData[String(tabInfo.id)] as any
+        console.log('TerraCart: Cached for tab:', tabInfo.id, cached)
+        if (cached && (cached.primaryProduct || (cached.products && cached.products.length > 0))) {
+          console.log('TerraCart: Using cached data')
           handleScanData(cached)
           setIsScanning(false)
           return
         }
       }
       // Fresh scan
+      console.log('TerraCart: Requesting fresh scan')
       const scanResult = await sendMessage({ type: 'SCAN_PAGE' })
+      console.log('TerraCart: Scan result:', scanResult)
       if (!scanResult) {
         setGeminiError('No response from background service. Try reloading the extension in chrome://extensions/.')
-      } else if (scanResult.error) {
-        setGeminiError(scanResult.error)
+      } else if (scanResult.error && scanResult.error !== 'Non-shopping site') {
+        // Don't show an error for non-shopping pages — just show the EmptyState
+        if (!scanResult.error.includes('Cannot scan') && !scanResult.error.includes('No active tab')) {
+          setGeminiError(scanResult.error)
+        }
       } else {
         handleScanResult(scanResult)
       }
@@ -150,8 +162,10 @@ export function App() {
   }
 
   const handleScanData = (data: any) => {
+    console.log('TerraCart: handleScanData called with:', data)
     if (!data) return
     if (data.primaryProduct) {
+      console.log('TerraCart: Found primaryProduct:', data.primaryProduct.name)
       setDetectedProduct(data.primaryProduct)
       setPageScanResult({
         type: 'product-page',
@@ -163,6 +177,7 @@ export function App() {
       })
       analyzeProduct(data.primaryProduct)
     } else if ((data.productCount || 0) > 0) {
+      console.log('TerraCart: Found products:', data.productCount)
       setPageScanResult({
         type: 'search-results',
         products: [],
@@ -171,19 +186,26 @@ export function App() {
         timestamp: Date.now(),
         searchQuery: data.searchQuery,
       })
+    } else {
+      console.log('TerraCart: No products found in scan data')
     }
   }
 
   const handleScanResult = (result: any) => {
+    console.log('TerraCart: handleScanResult called with:', result)
     if (!result) return
     const products = result.products || []
     setPageScanResult(result)
     if (result.primaryProduct) {
+      console.log('TerraCart: Found primaryProduct in result:', result.primaryProduct.name)
       setDetectedProduct(result.primaryProduct)
       analyzeProduct(result.primaryProduct)
     } else if (products.length > 0) {
+      console.log('TerraCart: Found products in result:', products.length)
       setDetectedProduct(products[0])
       analyzeProduct(products[0])
+    } else {
+      console.log('TerraCart: No products found in scan result')
     }
   }
 

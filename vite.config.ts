@@ -31,6 +31,7 @@ function copyStaticAssets() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   return {
+  base: './',
   plugins: [
     react(),
     copyStaticAssets(),
@@ -70,3 +71,4 @@ export default defineConfig(({ mode }) => {
   }
   }
 })
+
