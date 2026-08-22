@@ -177,39 +177,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // ---- Scan Page ----
     case 'SCAN_PAGE': {
+      const emptyResult = (err?: string) => ({
+        type: 'other' as const, products: [] as never[], primaryProduct: null,
+        retailer: '', pageTitle: '', timestamp: Date.now(),
+        ...(err ? { error: err } : {}),
+      })
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0]
-        if (!tab?.id) {
-          sendResponse({ error: 'No active tab', type: 'other', products: [], retailer: '', pageTitle: '', timestamp: Date.now() })
-          return
-        }
+        if (!tab?.id) { sendResponse(emptyResult('No active tab')); return }
         if (tab.url && /^(chrome|chrome-extension|about|edge):/.test(tab.url)) {
-          sendResponse({ error: 'Cannot scan browser pages', type: 'other', products: [], retailer: '', pageTitle: tab.title || '', timestamp: Date.now() })
-          return
+          sendResponse(emptyResult('Cannot scan browser pages')); return
         }
         const tabId = tab.id
-        const tabUrl = tab.url
-        const tabTitle = tab.title
+        const tabUrl = tab.url || ''
+        const tabTitle = tab.title || ''
+        const hostname = tabUrl ? new URL(tabUrl).hostname : ''
+        // Safety timeout — always respond within 5s
+        let responded = false
+        const safeRespond = (data: any) => {
+          if (!responded) { responded = true; sendResponse(data) }
+        }
+        setTimeout(() => safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle }), 5000)
 
+        // Try content script
         chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (result) => {
-          if (chrome.runtime.lastError || !result) {
-            chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }, () => {
+          if (!responded && !chrome.runtime.lastError && result) {
+            safeRespond(result)
+          } else if (!responded) {
+            // Content script not loaded — inject it
+            chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }).then(() => {
               setTimeout(() => {
                 chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (retryResult) => {
-                  if (chrome.runtime.lastError || !retryResult) {
-                    sendResponse({
-                      type: 'other', products: [], primaryProduct: null,
-                      retailer: tabUrl ? new URL(tabUrl).hostname : '',
-                      pageTitle: tabTitle || '', timestamp: Date.now(),
-                    })
-                  } else {
-                    sendResponse(retryResult)
+                  if (!responded && !chrome.runtime.lastError && retryResult) {
+                    safeRespond(retryResult)
+                  } else if (!responded) {
+                    safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
                   }
                 })
-              }, 600)
+              }, 800)
+            }).catch(() => {
+              safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
             })
-          } else {
-            sendResponse(result)
           }
         })
       })
