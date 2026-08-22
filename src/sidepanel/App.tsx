@@ -24,6 +24,7 @@ type Panel = 'sidepanel' | 'settings' | 'history'
 
 // ---- Helper: send message to background ----
 function sendMessage(message: Record<string, unknown>, timeoutMs = 30000): Promise<any> {
+  console.log('TerraCart: sendMessage called for', message.type)
   return new Promise((resolve) => {
     let resolved = false
     const timer = setTimeout(() => {
@@ -43,6 +44,7 @@ function sendMessage(message: Record<string, unknown>, timeoutMs = 30000): Promi
             console.warn('TerraCart: sendMessage error for', message.type, chrome.runtime.lastError.message)
             resolve(null)
           } else {
+            console.log('TerraCart: sendMessage response for', message.type, ':', response)
             resolve(response)
           }
         }
@@ -806,9 +808,21 @@ function ResearchAlternativesButton({
   const [error, setError] = useState<string | null>(null)
 
   const handleResearch = async () => {
+    console.log('TerraCart: STARTING RESEARCH')
+    console.log('TerraCart: Current product:', product)
+    console.log('TerraCart: Current analysis:', currentProductAnalysis)
+    
     setIsResearching(true)
     setError(null)
     setResearchStatus([])
+
+    // Verify product exists
+    if (!product || !product.name) {
+      console.error('TerraCart: No product available for research')
+      setError('TerraCart could not identify the current product. Rescan the page and try again.')
+      setIsResearching(false)
+      return
+    }
 
     setResearchStatus(['Connecting to Gemini AI...'])
 
@@ -825,6 +839,7 @@ function ResearchAlternativesButton({
     }, 8000))
 
     try {
+      console.log('TerraCart: Sending GEMINI_RESEARCH request...')
       const result = await sendMessage({
         type: 'GEMINI_RESEARCH',
         product,
@@ -832,19 +847,29 @@ function ResearchAlternativesButton({
         researchType: 'all',
       })
 
+      console.log('TerraCart: Research response received:', result)
+
       if (!result) {
+        console.error('TerraCart: No response from background')
         setError('No response from background. Make sure the extension is fully loaded — try disabling and re-enabling TerraCart in chrome://extensions/.')
         setIsResearching(false)
         return
       }
 
       if (result.error) {
+        console.error('TerraCart: Research error:', result.error)
         setError(result.error)
         setIsResearching(false)
         return
       }
 
       if (result.research) {
+        console.log('TerraCart: Research data:', {
+          alternatives: result.research.alternatives?.length || 0,
+          reusableAlternatives: result.research.reusableAlternatives?.length || 0,
+          packagingAlternatives: result.research.packagingAlternatives?.length || 0,
+        })
+        
         // Convert Gemini research results into Alternative objects
         const alternatives: Alternative[] = []
 
@@ -927,26 +952,35 @@ function ResearchAlternativesButton({
           }
         }
 
+        console.log('TerraCart: Processed alternatives:', alternatives.length)
+        
         // Update the analysis with real research alternatives
-        if (currentProductAnalysis && alternatives.length > 0) {
+        if (currentProductAnalysis) {
+          console.log('TerraCart: Updating product analysis with alternatives')
           setProductAnalysis({
             ...currentProductAnalysis,
             alternatives,
           })
+        } else {
+          console.warn('TerraCart: currentProductAnalysis is null, cannot update alternatives')
         }
 
         if (alternatives.length === 0) {
+          console.log('TerraCart: No alternatives found')
           setError('Gemini responded but found no alternatives for this product. Try re-analyzing the product first, then research again.')
         } else {
+          console.log('TerraCart: Research complete, calling onComplete')
           onComplete()
         }
       } else if (result && !result.error && !result.research) {
+        console.error('TerraCart: Unexpected response structure:', result)
         setError('Gemini returned an unexpected response. The research feature may be temporarily unavailable. Check the browser console for details.')
       }
     } catch (err: any) {
       console.error('TerraCart: handleResearch exception:', err)
       setError('Research failed: ' + (err?.message || String(err)))
     } finally {
+      console.log('TerraCart: Research complete, cleaning up')
       timers.forEach(t => clearTimeout(t))
       setIsResearching(false)
     }
