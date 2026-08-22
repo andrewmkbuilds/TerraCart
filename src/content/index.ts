@@ -48,9 +48,97 @@ if ((window as any).__terracartInitialized) {
     observePageChanges()
   }
 
+  // ---- Non-shopping site blocklist (comprehensive) ----
+  // TerraCart MUST NOT activate on any of these sites
+  const NON_SHOPPING_BLOCKLIST = [
+    // Google services
+    'google.com', 'gemini.google.com', 'aistudio.google.com',
+    'gmail.com', 'docs.google.com', 'drive.google.com',
+    'calendar.google.com', 'maps.google.com', 'meet.google.com',
+    'scholar.google.com', 'news.google.com', 'photos.google.com',
+    'translate.google.com', 'earth.google.com', 'books.google.com',
+    'classroom.google.com', 'forms.google.com', 'sheets.google.com',
+    'slides.google.com', 'keep.google.com', 'groups.google.com',
+    'cloud.google.com', 'console.cloud.google.com',
+    // AI assistants
+    'chatgpt.com', 'chat.openai.com', 'openai.com',
+    'claude.ai', 'anthropic.com', 'perplexity.ai',
+    'copilot.microsoft.com', 'bing.com',
+    'huggingface.co', 'replicate.com',
+    // Social media
+    'facebook.com', 'instagram.com', 'twitter.com', 'x.com',
+    'linkedin.com', 'reddit.com', 'tiktok.com', 'snapchat.com',
+    'pinterest.com', 'threads.net', 'mastodon.social',
+    'bsky.app', 'truthsocial.com',
+    // Video/Streaming
+    'youtube.com', 'netflix.com', 'twitch.tv', 'hulu.com',
+    'disneyplus.com', 'hbomax.com', 'primevideo.com',
+    'vimeo.com', 'dailymotion.com', 'twitch.tv',
+    // Music
+    'spotify.com', 'music.apple.com', 'soundcloud.com',
+    'deezer.com', 'tidal.com', 'pandora.com',
+    // Productivity/Work
+    'notion.so', 'airtable.com', 'figma.com', 'canva.com',
+    'slack.com', 'discord.com', 'teams.microsoft.com',
+    'trello.com', 'asana.com', 'monday.com', 'clickup.com',
+    'linear.app', 'jira.atlassian.com', 'confluence.atlassian.com',
+    'miro.com', 'lucidchart.com',
+    // Cloud/Dev
+    'github.com', 'gitlab.com', 'bitbucket.org',
+    'stackoverflow.com', 'stackexchange.com',
+    'vercel.com', 'netlify.com', 'heroku.com',
+    'aws.amazon.com', 'cloud.google.com', 'portal.azure.com',
+    'digitalocean.com', 'linode.com', 'vultr.com',
+    // File storage
+    'dropbox.com', 'onedrive.live.com', 'drive.google.com',
+    'icloud.com', 'box.com', 'mega.nz',
+    // News/Blogs
+    'medium.com', 'substack.com', 'wordpress.com',
+    'blogger.com', 'ghost.io',
+    // Communication
+    'zoom.us', 'webex.com', 'goto.com',
+    'mailchimp.com', 'sendgrid.com',
+    // Education
+    'coursera.org', 'udemy.com', 'edx.org',
+    'khanacademy.org', 'skillshare.com',
+    // Reference
+    'wikipedia.org', 'britannica.com',
+    // Government/Info
+    'gov', '.mil', '.edu',
+    // Other non-shopping
+    'archive.org', 'imdb.com', 'rottentomatoes.com',
+    'metacritic.com', 'goodreads.com', 'tripadvisor.com',
+    'yelp.com', 'zomato.com', 'opentable.com',
+    'booking.com', 'airbnb.com', 'expedia.com',
+    'uber.com', 'lyft.com',
+  ]
+
+  // ---- Check if URL is on the blocklist ----
+  function isBlocklistedUrl(url: string): boolean {
+    try {
+      const hostname = new URL(url).hostname.replace('www.', '')
+      return NON_SHOPPING_BLOCKLIST.some(d => {
+        // Exact match or subdomain match
+        if (hostname === d) return true
+        if (hostname.endsWith('.' + d)) return true
+        // Special handling for Google domains
+        if (d === 'google.com' && hostname.endsWith('.google.com')) return true
+        return false
+      })
+    } catch {
+      return false
+    }
+  }
+
   // ---- Initial Detection ----
   function runInitialDetection() {
     const url = window.location.href
+
+    // CRITICAL: Check blocklist FIRST - before any other detection
+    if (isBlocklistedUrl(url)) {
+      // Do nothing - TerraCart stays completely inactive
+      return
+    }
 
     // Fast path: known shopping domain
     if (isKnownShoppingSite(url)) {
@@ -60,33 +148,16 @@ if ((window as any).__terracartInitialized) {
       return
     }
 
-    // Blocklist check
-    try {
-      const hostname = new URL(url).hostname.replace('www.', '')
-      const blocklist = [
-        'google.com', 'gemini.google.com', 'chatgpt.com', 'openai.com',
-        'youtube.com', 'gmail.com', 'github.com', 'gitlab.com',
-        'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
-        'linkedin.com', 'reddit.com', 'tiktok.com', 'notion.so',
-        'spotify.com', 'netflix.com', 'twitch.tv', 'wikipedia.org',
-        'medium.com', 'slack.com', 'discord.com', 'teams.microsoft.com',
-        'zoom.us', 'meet.google.com', 'claude.ai', 'perplexity.ai',
-        'docs.google.com', 'drive.google.com', 'calendar.google.com',
-        'maps.google.com', 'stackoverflow.com', 'figma.com', 'canva.com',
-        'dropbox.com', 'trello.com', 'asana.com', 'jira.atlassian.com',
-        'chat.openai.com', 'bitbucket.org', 'pinterest.com',
-        'substack.com', 'stackexchange.com', 'onedrive.live.com',
-      ]
-      if (blocklist.some(d => hostname === d || hostname.endsWith('.' + d))) {
-        return
-      }
-    } catch { /* continue */ }
-
     // Full e-commerce detection — wait for DOM to settle
     setTimeout(() => {
+      // Re-check blocklist after delay (in case of SPA navigation)
+      if (isBlocklistedUrl(window.location.href)) {
+        return
+      }
+      
       const detection = detectECommerceSite(document, url)
       lastDetection = detection
-      if (detection.isECommerce) {
+      if (detection.isECommerce && detection.confidence >= 60) {
         activateTerraCart('detected', detection)
         scheduleScanDelayed(2000)
       }

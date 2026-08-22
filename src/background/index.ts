@@ -91,10 +91,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // ---- Content Script Ready (auto-open logic) ----
     case 'CONTENT_SCRIPT_READY': {
       if (sender.tab?.id) {
+        const tabUrl = message.data?.url || ''
+        
+        // CRITICAL: Check blocklist BEFORE any auto-open logic
+        if (isBlocklistedUrl(tabUrl)) {
+          sendResponse({ success: false, error: 'Non-shopping site' })
+          return false
+        }
+        
         if (message.data) tabDetectionData.set(sender.tab.id, message.data)
         updateBadgeForTab(sender.tab.id, 'active')
 
-        const tabUrl = message.data?.url || ''
         const pageType = message.data?.pageType as string | undefined
 
         chrome.storage.local.get(STORAGE_KEYS.PREFERENCES).then((prefs) => {
@@ -419,6 +426,64 @@ function updateBadgeForTab(tabId: number, state: 'active' | 'product' | 'search'
       chrome.action.setBadgeText({ text: '●', tabId })
       chrome.action.setBadgeBackgroundColor({ color: '#16a34a', tabId })
       break
+  }
+}
+
+// ---- Non-shopping site blocklist (comprehensive) ----
+const NON_SHOPPING_BLOCKLIST = [
+  // Google services
+  'google.com', 'gemini.google.com', 'aistudio.google.com',
+  'gmail.com', 'docs.google.com', 'drive.google.com',
+  'calendar.google.com', 'maps.google.com', 'meet.google.com',
+  'scholar.google.com', 'news.google.com', 'photos.google.com',
+  'translate.google.com', 'cloud.google.com',
+  // AI assistants
+  'chatgpt.com', 'chat.openai.com', 'openai.com',
+  'claude.ai', 'anthropic.com', 'perplexity.ai',
+  'copilot.microsoft.com', 'bing.com',
+  // Social media
+  'facebook.com', 'instagram.com', 'twitter.com', 'x.com',
+  'linkedin.com', 'reddit.com', 'tiktok.com', 'snapchat.com',
+  'pinterest.com', 'threads.net',
+  // Video/Streaming
+  'youtube.com', 'netflix.com', 'twitch.tv', 'hulu.com',
+  'disneyplus.com', 'vimeo.com',
+  // Music
+  'spotify.com', 'soundcloud.com', 'deezer.com',
+  // Productivity/Work
+  'notion.so', 'airtable.com', 'figma.com', 'canva.com',
+  'slack.com', 'discord.com', 'teams.microsoft.com',
+  'trello.com', 'asana.com', 'monday.com', 'clickup.com',
+  'jira.atlassian.com', 'confluence.atlassian.com',
+  // Cloud/Dev
+  'github.com', 'gitlab.com', 'bitbucket.org',
+  'stackoverflow.com', 'stackexchange.com',
+  'vercel.com', 'netlify.com',
+  // File storage
+  'dropbox.com', 'onedrive.live.com', 'mega.nz',
+  // News/Blogs
+  'medium.com', 'substack.com',
+  // Communication
+  'zoom.us', 'webex.com',
+  // Reference
+  'wikipedia.org', 'britannica.com',
+  // Other non-shopping
+  'archive.org', 'imdb.com',
+  'tripadvisor.com', 'yelp.com',
+  'booking.com', 'airbnb.com',
+]
+
+function isBlocklistedUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.replace('www.', '')
+    return NON_SHOPPING_BLOCKLIST.some(d => {
+      if (hostname === d) return true
+      if (hostname.endsWith('.' + d)) return true
+      if (d === 'google.com' && hostname.endsWith('.google.com')) return true
+      return false
+    })
+  } catch {
+    return false
   }
 }
 
