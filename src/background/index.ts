@@ -6,7 +6,6 @@
 // ============================================================
 
 import { analyzeProductWithGemini, researchAlternativesWithGemini, chatWithGemini } from '../ai/gemini-service'
-import { getApiKey, saveApiKey, isApiKeyConfigured } from '../ai/gemini-client'
 import type { Product, UserPreferences } from '../types'
 
 const STORAGE_KEYS = {
@@ -22,14 +21,12 @@ const STORAGE_KEYS = {
   WEBSITE_AUTO_OPEN: 'terracart_website_auto_open',
 } as const
 
-// ---- Known shopping domains (expanded for UAE/GCC focus) ----
+// ---- Known shopping domains ----
 const KNOWN_SHOPPING_DOMAINS = [
-  // Global
   'amazon.com', 'amazon.ae', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
   'amazon.co.jp', 'amazon.in', 'amazon.ca', 'amazon.com.au',
   'walmart.com', 'target.com', 'bestbuy.com', 'ebay.com', 'etsy.com',
   'aliexpress.com',
-  // UAE/GCC Major Retailers
   'noon.com', 'namshi.com', 'centrepoint.com', '6thstreet.com',
   'ounass.ae', 'shein.com', 'hm.com', 'zara.com', 'pullandbear.com',
   'bershka.com', 'stradivarius.com', 'massimodutti.com',
@@ -42,14 +39,16 @@ const KNOWN_SHOPPING_DOMAINS = [
   'iherb.com', 'mumzworld.com', 'firstcry.ae',
   'virginmegastore.me', 'kikomilano.ae', 'rituals.com',
   'americaneagle.me',
-  // UAE Grocery & Pharmacy
   'carrefouruae.com', 'luluhypermarket.com', 'spinneys.com',
   'waitrose.ae', 'boots.ae', 'lifepharmacy.com',
-  // UAE Electronics
   'sharafdg.com', 'jumbo.ae', 'emax.ae',
-  // UAE Home
   'danubehome.com', 'ikea.ae', 'aceuae.com',
 ]
+
+// ---- Tab Data Caches ----
+const tabScanData = new Map<number, unknown>()
+const tabDetectionData = new Map<number, unknown>()
+const pendingAutoOpenTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
 // ---- Side Panel Setup ----
 if (chrome.sidePanel) {
@@ -68,8 +67,12 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 })
 
-// ---- Message Handling ----
-chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+// ============================================================
+// Message Handling — MUST NOT be async.
+// Chrome MV3 requires the listener callback to be synchronous.
+// Use .then() for async work and return true to keep the channel.
+// ============================================================
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
 
     // ---- Panel / Navigation ----
@@ -85,72 +88,68 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       return false
     }
 
-    // ---- Tab / Scan Data ----
+    // ---- Content Script Ready (auto-open logic) ----
     case 'CONTENT_SCRIPT_READY': {
       if (sender.tab?.id) {
         if (message.data) tabDetectionData.set(sender.tab.id, message.data)
         updateBadgeForTab(sender.tab.id, 'active')
 
-        // Auto-open side panel on e-commerce sites if enableAutoOpenPanel is on
-        const prefs = await chrome.storage.local.get(STORAGE_KEYS.PREFERENCES)
-        const userPrefs = prefs[STORAGE_KEYS.PREFERENCES]
-        if (userPrefs?.enableAutoOpenPanel !== false && sender.tab.windowId) {
-          // Check per-site auto-open override
-          const tabUrl = message.data?.url || ''
-          const siteAutoOpen = await isWebsiteAutoOpen(tabUrl)
-          const pageType = message.data?.pageType as string | undefined
-          const productPagesOnly = userPrefs?.autoOpenProductPagesOnly === true
-          if (siteAutoOpen && (!productPagesOnly || pageType === 'product')) {
-            const tabId = sender.tab.id
-            const windowId = sender.tab.windowId
-            const delayMs = ((userPrefs?.autoOpenDelay as number) ?? 2) * 1000
-            const showNotification = userPrefs?.autoOpenNotification !== false
+        const tabUrl = message.data?.url || ''
+        const pageType = message.data?.pageType as string | undefined
 
-            // Notify content script that auto-open is pending (shows toast)
-            if (showNotification && delayMs > 0 && tabId) {
-              try {
-                chrome.tabs.sendMessage(tabId, {
-                  type: 'AUTO_OPEN_PENDING',
-                  delay: delayMs,
-                }).catch(() => {})
-              } catch { /* tab may have navigated */ }
-            }
+        chrome.storage.local.get(STORAGE_KEYS.PREFERENCES).then((prefs) => {
+          const userPrefs = prefs[STORAGE_KEYS.PREFERENCES]
+          if (userPrefs?.enableAutoOpenPanel !== false && sender.tab?.windowId) {
+            isWebsiteAutoOpen(tabUrl).then((siteAutoOpen) => {
+              const productPagesOnly = userPrefs?.autoOpenProductPagesOnly === true
+              if (siteAutoOpen && (!productPagesOnly || pageType === 'product')) {
+                const tabId = sender.tab!.id!
+                const windowId = sender.tab!.windowId!
+                const delayMs = ((userPrefs?.autoOpenDelay as number) ?? 2) * 1000
+                const showNotification = userPrefs?.autoOpenNotification !== false
 
-            // Delay the actual panel open
-            const timerId = setTimeout(async () => {
-              pendingAutoOpenTimers.delete(tabId)
-              try {
-                await chrome.sidePanel.open({ windowId })
-                // Notify content script that panel opened (plays sound with configured volume)
-                if (tabId) {
+                if (showNotification && delayMs > 0 && tabId) {
                   chrome.tabs.sendMessage(tabId, {
-                    type: 'AUTO_OPEN_DONE',
-                    chimeVolume: userPrefs?.chimeVolume ?? 'soft',
+                    type: 'AUTO_OPEN_PENDING',
+                    delay: delayMs,
                   }).catch(() => {})
                 }
-              } catch { /* side panel may already be open or context invalidated */ }
-            }, delayMs)
-            pendingAutoOpenTimers.set(tabId, timerId)
+
+                const timerId = setTimeout(() => {
+                  pendingAutoOpenTimers.delete(tabId)
+                  chrome.sidePanel.open({ windowId }).then(() => {
+                    if (tabId) {
+                      chrome.tabs.sendMessage(tabId, {
+                        type: 'AUTO_OPEN_DONE',
+                        chimeVolume: userPrefs?.chimeVolume ?? 'soft',
+                      }).catch(() => {})
+                    }
+                  }).catch(() => {})
+                }, delayMs)
+                pendingAutoOpenTimers.set(tabId, timerId)
+              }
+            }).catch(() => {})
           }
-        }
+        }).catch(() => {})
       }
       sendResponse({ success: true })
       return false
     }
 
     case 'CANCEL_AUTO_OPEN': {
-      const tabId4 = sender.tab?.id
-      if (tabId4) {
-        const timer = pendingAutoOpenTimers.get(tabId4)
+      const tabIdCancel = sender.tab?.id
+      if (tabIdCancel) {
+        const timer = pendingAutoOpenTimers.get(tabIdCancel)
         if (timer) {
           clearTimeout(timer)
-          pendingAutoOpenTimers.delete(tabId4)
+          pendingAutoOpenTimers.delete(tabIdCancel)
         }
       }
       sendResponse({ success: true })
       return false
     }
 
+    // ---- Page Scan Data ----
     case 'PAGE_SCANNED': {
       if (sender.tab?.id && message.data) {
         tabScanData.set(sender.tab.id, message.data)
@@ -167,48 +166,41 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     }
 
     case 'SET_BADGE': {
-      const tabId = sender.tab?.id
-      if (tabId && message.text !== undefined) {
-        chrome.action.setBadgeText({ text: message.text, tabId })
-        if (message.color) chrome.action.setBadgeBackgroundColor({ color: message.color, tabId })
+      const tabIdBadge = sender.tab?.id
+      if (tabIdBadge && message.text !== undefined) {
+        chrome.action.setBadgeText({ text: message.text, tabId: tabIdBadge })
+        if (message.color) chrome.action.setBadgeBackgroundColor({ color: message.color, tabId: tabIdBadge })
       }
       sendResponse({ success: true })
       return false
     }
 
+    // ---- Scan Page ----
     case 'SCAN_PAGE': {
-      // MUST use non-async callback so return true keeps the channel open
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0]
         if (!tab?.id) {
-          sendResponse({ error: 'No active tab found', type: 'other', products: [], retailer: '', pageTitle: '', timestamp: Date.now() })
+          sendResponse({ error: 'No active tab', type: 'other', products: [], retailer: '', pageTitle: '', timestamp: Date.now() })
+          return
+        }
+        if (tab.url && /^(chrome|chrome-extension|about|edge):/.test(tab.url)) {
+          sendResponse({ error: 'Cannot scan browser pages', type: 'other', products: [], retailer: '', pageTitle: tab.title || '', timestamp: Date.now() })
           return
         }
         const tabId = tab.id
-        if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('edge://'))) {
-          sendResponse({ error: 'Cannot scan browser pages. Navigate to a website first.', type: 'other', products: [], retailer: '', pageTitle: tab.title || '', timestamp: Date.now() })
-          return
-        }
-        // Try sending to content script
+        const tabUrl = tab.url
+        const tabTitle = tab.title
+
         chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (result) => {
           if (chrome.runtime.lastError || !result) {
-            // Content script not loaded — inject it
-            console.log('TerraCart BG: Content script not responding, injecting...')
-            chrome.scripting.executeScript({
-              target: { tabId },
-              files: ['content.js'],
-            }, () => {
-              // Wait for init then retry
+            chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }, () => {
               setTimeout(() => {
                 chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (retryResult) => {
                   if (chrome.runtime.lastError || !retryResult) {
                     sendResponse({
-                      type: 'other',
-                      products: [],
-                      primaryProduct: null,
-                      retailer: tab.url ? new URL(tab.url).hostname : '',
-                      pageTitle: tab.title || '',
-                      timestamp: Date.now(),
+                      type: 'other', products: [], primaryProduct: null,
+                      retailer: tabUrl ? new URL(tabUrl).hostname : '',
+                      pageTitle: tabTitle || '', timestamp: Date.now(),
                     })
                   } else {
                     sendResponse(retryResult)
@@ -225,15 +217,15 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     }
 
     case 'GET_TAB_SCAN_DATA': {
-      const tabId2 = message.tabId || sender.tab?.id
-      if (tabId2) sendResponse(tabScanData.get(tabId2) || null)
+      const tabIdData = message.tabId || sender.tab?.id
+      if (tabIdData) sendResponse(tabScanData.get(tabIdData) || null)
       else sendResponse(null)
       return false
     }
 
     case 'GET_ALL_TAB_SCAN_DATA': {
       const allData: Record<number, unknown> = {}
-      tabScanData.forEach((data, tabId) => { allData[tabId] = data })
+      tabScanData.forEach((data, tid) => { allData[tid] = data })
       sendResponse(allData)
       return false
     }
@@ -285,8 +277,8 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     }
 
     case 'GET_DETECTION_DATA': {
-      const tabId3 = message.tabId || sender.tab?.id
-      if (tabId3) sendResponse(tabDetectionData.get(tabId3) || null)
+      const tabIdDetect = message.tabId || sender.tab?.id
+      if (tabIdDetect) sendResponse(tabDetectionData.get(tabIdDetect) || null)
       else sendResponse(null)
       return false
     }
@@ -297,18 +289,13 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       return false
     }
 
-    // ============================================================
-    // GEMINI AI MESSAGES — the core AI functionality
-    // ============================================================
-
+    // ---- Gemini AI ----
     case 'GET_API_KEY': {
-      // Always report configured — embedded key is used as fallback
       sendResponse({ configured: true, hasKey: true })
       return false
     }
 
     case 'SET_API_KEY': {
-      // No-op: API key is embedded
       sendResponse({ success: true })
       return false
     }
@@ -316,16 +303,10 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     case 'GEMINI_ANALYZE': {
       const product = message.product as Product
       const preferences = message.preferences as UserPreferences
-      if (!product) {
-        sendResponse({ error: 'No product provided' })
-        return false
-      }
-      console.log('TerraCart BG: Starting GEMINI_ANALYZE for', product.name)
+      if (!product) { sendResponse({ error: 'No product provided' }); return false }
       analyzeProductWithGemini(product, preferences).then(result => {
-        console.log('TerraCart BG: GEMINI_ANALYZE result:', result.error || 'success')
         sendResponse(result)
       }).catch((err: unknown) => {
-        console.error('TerraCart BG: GEMINI_ANALYZE failed:', err)
         sendResponse({ analysis: null, sources: [], error: String(err) })
       })
       return true
@@ -335,16 +316,10 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       const rProduct = message.product as Product
       const rPrefs = message.preferences as UserPreferences
       const rType = message.researchType as 'alternatives' | 'reusable' | 'packaging' | 'all'
-      if (!rProduct) {
-        sendResponse({ error: 'No product provided' })
-        return false
-      }
-      console.log('TerraCart BG: Starting GEMINI_RESEARCH for', rProduct.name, 'type:', rType)
+      if (!rProduct) { sendResponse({ error: 'No product provided' }); return false }
       researchAlternativesWithGemini(rProduct, rPrefs, rType || 'all').then(result => {
-        console.log('TerraCart BG: GEMINI_RESEARCH result:', result.error || 'success', 'alternatives:', result.research?.alternatives?.length || 0)
         sendResponse(result)
       }).catch((err: unknown) => {
-        console.error('TerraCart BG: GEMINI_RESEARCH failed:', err)
         sendResponse({ research: null, sources: [], searchQueries: [], error: String(err) })
       })
       return true
@@ -355,27 +330,16 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
       const chatPrefs = message.preferences as UserPreferences
       const chatMsg = message.message as string
       const chatHistory = message.chatHistory as Array<{ role: 'user' | 'assistant'; content: string }> || []
-      if (!chatMsg) {
-        sendResponse({ content: 'No message provided', sources: [] })
-        return false
-      }
-      console.log('TerraCart BG: Starting GEMINI_CHAT')
+      if (!chatMsg) { sendResponse({ content: 'No message provided', sources: [] }); return false }
       chatWithGemini(chatMsg, chatProduct, chatPrefs, chatHistory).then(result => {
-        console.log('TerraCart BG: GEMINI_CHAT result:', result.content?.slice(0, 100) || 'empty')
         sendResponse(result)
       }).catch((err: unknown) => {
-        console.error('TerraCart BG: GEMINI_CHAT failed:', err)
         sendResponse({ content: 'Error: ' + String(err), sources: [] })
       })
       return true
     }
   }
 })
-
-// ---- Tab Data Caches ----
-const tabScanData = new Map<number, unknown>()
-const tabDetectionData = new Map<number, unknown>()
-const pendingAutoOpenTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
 // ---- Tab Monitoring ----
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
@@ -407,7 +371,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
     tabScanData.delete(tabId)
     tabDetectionData.delete(tabId)
-
     isWebsiteEnabled(tab.url).then(enabled => {
       if (enabled) {
         if (isKnownDomain(tab.url!)) {
@@ -427,10 +390,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   tabScanData.delete(tabId)
   tabDetectionData.delete(tabId)
   const timer = pendingAutoOpenTimers.get(tabId)
-  if (timer) {
-    clearTimeout(timer)
-    pendingAutoOpenTimers.delete(tabId)
-  }
+  if (timer) { clearTimeout(timer); pendingAutoOpenTimers.delete(tabId) }
 })
 
 // ---- Badge Management ----
@@ -445,7 +405,7 @@ function updateBadgeForTab(tabId: number, state: 'active' | 'product' | 'search'
       chrome.action.setBadgeBackgroundColor({ color: '#3b82f6', tabId })
       break
     case 'active':
-      chrome.action.setBadgeText({ text: '🌍', tabId })
+      chrome.action.setBadgeText({ text: '●', tabId })
       chrome.action.setBadgeBackgroundColor({ color: '#16a34a', tabId })
       break
   }
@@ -459,9 +419,7 @@ function isKnownDomain(url: string): boolean {
       const clean = d.replace('www.', '')
       return hostname === clean || hostname.endsWith('.' + clean)
     })
-  } catch {
-    return false
-  }
+  } catch { return false }
 }
 
 async function isWebsiteEnabled(url: string): Promise<boolean> {
@@ -470,11 +428,8 @@ async function isWebsiteEnabled(url: string): Promise<boolean> {
     const result = await chrome.storage.local.get(STORAGE_KEYS.WEBSITE_ENABLED)
     const settings = result[STORAGE_KEYS.WEBSITE_ENABLED] || {}
     if (hostname in settings) return settings[hostname]
-    if (isKnownDomain(url)) return true
     return true
-  } catch {
-    return true
-  }
+  } catch { return true }
 }
 
 async function toggleWebsiteEnabled(hostname: string, enabled: boolean): Promise<void> {
@@ -498,9 +453,7 @@ async function isWebsiteAutoOpen(urlOrHostname: string): Promise<boolean> {
     if (hostname in settings) return settings[hostname]
     const prefs = await chrome.storage.local.get(STORAGE_KEYS.PREFERENCES)
     return prefs[STORAGE_KEYS.PREFERENCES]?.enableAutoOpenPanel !== false
-  } catch {
-    return true
-  }
+  } catch { return true }
 }
 
 async function toggleWebsiteAutoOpen(hostname: string, enabled: boolean): Promise<void> {
@@ -549,5 +502,3 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     chrome.tabs.create({ url: chrome.runtime.getURL('src/onboarding/index.html') })
   }
 })
-
-console.log('TerraCart background service worker loaded 🌍')
