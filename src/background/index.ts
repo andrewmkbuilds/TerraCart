@@ -177,13 +177,47 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     }
 
     case 'SCAN_PAGE': {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
         const tab = tabs[0]
-        if (tab?.id) {
-          chrome.tabs.sendMessage(tab.id, { type: 'SCAN_PAGE' }, (result) => {
-            sendResponse(result)
+        if (!tab?.id) {
+          sendResponse(null)
+          return
+        }
+        try {
+          // Try sending directly first
+          const result = await new Promise<any>((resolve) => {
+            chrome.tabs.sendMessage(tab.id!, { type: 'SCAN_PAGE' }, (r) => {
+              if (chrome.runtime.lastError) resolve(null)
+              else resolve(r)
+            })
           })
-        } else {
+          if (result) {
+            sendResponse(result)
+          } else {
+            // Content script not loaded — inject it programmatically
+            console.log('TerraCart BG: Content script not found, injecting...')
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: tab.id! },
+                files: ['content.js'],
+              })
+              // Wait for script to initialize
+              await new Promise(r => setTimeout(r, 300))
+              // Retry scan
+              const retryResult = await new Promise<any>((resolve) => {
+                chrome.tabs.sendMessage(tab.id!, { type: 'SCAN_PAGE' }, (r) => {
+                  if (chrome.runtime.lastError) resolve(null)
+                  else resolve(r)
+                })
+              })
+              sendResponse(retryResult)
+            } catch (injectErr) {
+              console.error('TerraCart BG: Failed to inject content script:', injectErr)
+              sendResponse(null)
+            }
+          }
+        } catch (err) {
+          console.error('TerraCart BG: SCAN_PAGE failed:', err)
           sendResponse(null)
         }
       })
