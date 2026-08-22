@@ -78,21 +78,31 @@ export async function researchAlternativesWithGemini(
   error?: string
 }> {
   try {
+    console.log('TerraCart: researchAlternativesWithGemini called', { product: product?.name, researchType })
     const prompt = buildResearchPrompt(product, preferences, researchType)
+    console.log('TerraCart: Research prompt built, calling Gemini...')
     const request = buildSearchGroundedRequest(RESEARCH_SYSTEM_PROMPT, prompt)
     const response = await callGemini(request)
+    console.log('TerraCart: Gemini response received')
     const text = extractText(response)
+    console.log('TerraCart: Extracted text length:', text.length)
     const sources = extractSources(response)
     const searchQueries = response.candidates?.[0]?.groundingMetadata?.webSearchQueries || []
+    console.log('TerraCart: Search queries:', searchQueries)
 
     const jsonStr = extractJsonFromText(text)
     if (!jsonStr) {
+      console.error('TerraCart: Could not parse research response as JSON')
+      console.log('TerraCart: Raw text:', text.slice(0, 500))
       return { research: null, sources, searchQueries, error: 'Could not parse research response' }
     }
 
+    console.log('TerraCart: Parsed JSON successfully')
     const parsed = JSON.parse(jsonStr) as GeminiResearchResult
+    console.log('TerraCart: Parsed alternatives:', parsed.alternatives?.length || 0)
     return { research: parsed, sources, searchQueries }
   } catch (err: any) {
+    console.error('TerraCart: researchAlternativesWithGemini error:', err)
     const msg = err?.message || String(err)
     if (msg.includes('GEMINI_API_KEY_MISSING')) {
       return { research: null, sources: [], searchQueries: [], error: 'GEMINI_API_KEY_MISSING' }

@@ -845,7 +845,7 @@ function ResearchAlternativesButton({
         product,
         preferences,
         researchType: 'all',
-      })
+      }, 60000) // 60 second timeout for research
 
       console.log('TerraCart: Research response received:', result)
 
@@ -1073,7 +1073,7 @@ function AlternativesTab({
         product,
         preferences,
         researchType: type,
-      })
+      }, 60000) // 60 second timeout for research
 
       console.log('TerraCart: Research result received:', result)
 
