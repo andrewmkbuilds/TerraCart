@@ -562,6 +562,7 @@ export function App() {
                 onOpenRetailer={() => window.open(product.url, '_blank')}
                 geminiConfigured={geminiConfigured === true}
                 onResearchAlternatives={() => setActiveTab('alternatives')}
+                currentUrl={currentUrl}
               />
             )}
             {activeTab === 'alternatives' && product && analysis && (
@@ -637,14 +638,18 @@ function GeminiSetupPrompt({ onConfigure }: { onConfigure: () => void }) {
 function OverviewTab({
   product, analysis, isSaved, showScoreBreakdown, onToggleScoreBreakdown,
   onSave, onReanalyze, isAnalyzing, researchSteps, onOpenRetailer,
-  geminiConfigured, onResearchAlternatives,
+  geminiConfigured, onResearchAlternatives, currentUrl,
 }: {
   product: Product; analysis: ProductAnalysis; isSaved: boolean
   showScoreBreakdown: boolean; onToggleScoreBreakdown: () => void
   onSave: () => void; onReanalyze: () => void; isAnalyzing: boolean
   researchSteps: any[]; onOpenRetailer: () => void
-  geminiConfigured: boolean; onResearchAlternatives: () => void
+  geminiConfigured: boolean; onResearchAlternatives: () => void; currentUrl: string
 }) {
+  const isCurrentPage = currentUrl && (
+    product.url === currentUrl ||
+    product.url.replace(/^https?:\/\//, '') === currentUrl.replace(/^https?:\/\//, '')
+  )
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Product Info */}
@@ -696,8 +701,8 @@ function OverviewTab({
           <button onClick={onReanalyze} className="terra-btn-outline text-xs flex-1">
             {isAnalyzing ? '⏳ Analyzing...' : '🔍 Re-analyze'}
           </button>
-          <button onClick={onOpenRetailer} className="terra-btn-outline text-xs flex-1">
-            🏪 View at Retailer
+          <button onClick={onOpenRetailer} className={`terra-btn-outline text-xs flex-1 ${isCurrentPage ? 'bg-green-50 border-green-200 text-green-700' : ''}`}>
+            {isCurrentPage ? '✓ On This Page' : '🏪 View at Retailer'}
           </button>
         </div>
       </div>
