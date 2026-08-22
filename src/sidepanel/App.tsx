@@ -1041,6 +1041,8 @@ function AlternativesTab({
         researchType: type,
       })
 
+      console.log('TerraCart: Research result received:', result)
+
       if (!result) {
         setResearchError('No response from background. Make sure the extension is loaded and the page is a shopping site.')
         setResearchState('error')
@@ -1048,12 +1050,18 @@ function AlternativesTab({
       }
 
       if (result.error) {
+        console.error('TerraCart: Research error:', result.error)
         setResearchError(result.error)
         setResearchState('error')
         return
       }
 
       if (result.research) {
+        console.log('TerraCart: Research data:', {
+          alternatives: result.research.alternatives?.length || 0,
+          reusableAlternatives: result.research.reusableAlternatives?.length || 0,
+          packagingAlternatives: result.research.packagingAlternatives?.length || 0,
+        })
         const alts: Alternative[] = []
         const allSources = result.sources || []
 
@@ -1125,16 +1133,16 @@ function AlternativesTab({
         if (result.research.packagingAlternatives) {
           for (const alt of result.research.packagingAlternatives) {
             alts.push({
-              productId: alt.url || alt.name,
+              productId: alt.url || alt.description,
               product: {
-                id: alt.url || alt.name,
-                name: alt.name,
-                brand: alt.brand || '',
+                id: alt.url || alt.description,
+                name: alt.description || 'Packaging alternative',
+                brand: '',
                 price: 0,
                 currency: 'AED',
                 image: '',
-                description: alt.reason || '',
-                materials: alt.characteristics || [],
+                description: alt.description || '',
+                materials: [],
                 category: product.category,
                 packaging: { type: ['none'], estimatedWeight: 'light', recyclable: true, containsPlastic: false, refillable: 'unknown' },
                 retailer: alt.retailer || '',
@@ -1142,11 +1150,11 @@ function AlternativesTab({
                 reviewCount: 0,
                 availability: 'unknown',
                 url: alt.url || '',
-                features: alt.characteristics || [],
+                features: [],
               },
-              reason: alt.reason || '',
-              improvementAreas: (alt.characteristics || []).slice(0, 3),
-              scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+              reason: alt.description || '',
+              improvementAreas: ['Lower packaging'],
+              scoreComparison: { original: 0, alternative: 0 },
               type: 'similar',
               priority: 'medium',
             })
@@ -1155,6 +1163,9 @@ function AlternativesTab({
 
         setWebAlternatives(prev => [...prev, ...alts])
         setResearchSources(allSources)
+        console.log('TerraCart: Updated webAlternatives, total count:', alts.length)
+      } else {
+        console.log('TerraCart: No research data in result')
       }
 
       setResearchState('done')

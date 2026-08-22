@@ -321,13 +321,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     case 'GEMINI_RESEARCH': {
+      console.log('TerraCart: GEMINI_RESEARCH received', { product: message.product?.name, type: message.researchType })
       const rProduct = message.product as Product
       const rPrefs = message.preferences as UserPreferences
       const rType = message.researchType as 'alternatives' | 'reusable' | 'packaging' | 'all'
       if (!rProduct) { sendResponse({ error: 'No product provided' }); return false }
       researchAlternativesWithGemini(rProduct, rPrefs, rType || 'all').then(result => {
+        console.log('TerraCart: GEMINI_RESEARCH result', { alternatives: result.research?.alternatives?.length || 0, error: result.error })
         sendResponse(result)
       }).catch((err: unknown) => {
+        console.error('TerraCart: GEMINI_RESEARCH error', err)
         sendResponse({ research: null, sources: [], searchQueries: [], error: String(err) })
       })
       return true
