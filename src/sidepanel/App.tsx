@@ -283,6 +283,78 @@ export function App() {
           }
 
           setProductAnalysis(analysis)
+
+          // Auto-trigger research when verdict suggests alternatives
+          if (verdict.level === 'consider-alternatives' || verdict.level === 'limited-info') {
+            sendMessage({
+              type: 'GEMINI_RESEARCH',
+              product,
+              preferences,
+              researchType: 'all',
+            }).then((result: any) => {
+              if (result?.research) {
+                const alts: Alternative[] = []
+                const buildAlt = (a: any, type: string): Alternative => ({
+                  productId: a.url || a.name,
+                  product: {
+                    id: a.url || a.name,
+                    name: a.name,
+                    brand: a.brand || '',
+                    price: 0,
+                    currency: 'AED',
+                    image: '',
+                    description: a.reason || '',
+                    materials: a.characteristics || [],
+                    category: product.category,
+                    packaging: { type: ['unknown' as const], estimatedWeight: 'moderate', recyclable: 'unknown' as const, containsPlastic: 'unknown' as const, refillable: 'unknown' as const },
+                    retailer: a.retailer || '',
+                    rating: 0,
+                    reviewCount: 0,
+                    availability: 'unknown' as const,
+                    url: a.url || '',
+                    features: a.characteristics || [],
+                  },
+                  reason: a.reason || '',
+                  improvementAreas: (a.characteristics || []).slice(0, 3),
+                  scoreComparison: { original: ecoScore.overall, alternative: a.ecoScore || 0 },
+                  type: type as any,
+                  priority: 'high' as const,
+                })
+                if (result.research.alternatives) {
+                  for (const a of result.research.alternatives) alts.push(buildAlt(a, 'similar'))
+                }
+                if (result.research.reusableAlternatives) {
+                  for (const a of result.research.reusableAlternatives) alts.push(buildAlt(a, 'reusable'))
+                }
+                if (result.research.packagingAlternatives) {
+                  for (const a of result.research.packagingAlternatives) {
+                    alts.push({
+                      productId: a.url || a.description,
+                      product: {
+                        id: a.url || a.description,
+                        name: a.description || 'Packaging alternative',
+                        brand: '', price: 0, currency: 'AED', image: '', description: a.description || '',
+                        materials: [], category: product.category,
+                        packaging: { type: ['none' as const], estimatedWeight: 'light', recyclable: true, containsPlastic: false, refillable: 'unknown' as const },
+                        retailer: a.retailer || '', rating: 0, reviewCount: 0, availability: 'unknown' as const, url: a.url || '',
+                      },
+                      reason: a.description || '',
+                      improvementAreas: ['Lower packaging'],
+                      scoreComparison: { original: ecoScore.overall, alternative: 0 },
+                      type: 'similar',
+                      priority: 'medium',
+                    })
+                  }
+                }
+                if (alts.length > 0) {
+                  setProductAnalysis({
+                    ...analysis,
+                    alternatives: alts,
+                  })
+                }
+              }
+            }).catch(() => {}) // silent — research is optional enhancement
+          }
         } else {
           // Gemini failed, fall back to local analysis
           performLocalAnalysis(product, steps)
