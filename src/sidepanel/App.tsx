@@ -274,8 +274,8 @@ export function App() {
 
           const checklist = generateChecklist(product, preferences)
           const packagingAnalysis = analyzePackaging(product)
-          const greenwashing = geminiAnalysis.greenwarningWarning
-            ? { detected: true, claims: [geminiAnalysis.greenwarningWarning], warning: geminiAnalysis.greenwarningWarning, confidence: 'medium' as const }
+          const greenwashing = geminiAnalysis.greenwashingWarning
+            ? { detected: true, claims: [geminiAnalysis.greenwashingWarning], warning: geminiAnalysis.greenwashingWarning, confidence: 'medium' as const }
             : detectGreenwashing(product)
 
           const analysis: ProductAnalysis = {
@@ -607,7 +607,11 @@ export function App() {
               href={product.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 terra-btn-primary text-xs py-2 flex items-center justify-center gap-1.5 text-center"
+              className={`flex-1 text-xs py-2 flex items-center justify-center gap-1.5 text-center ${
+                product.url && product.url.startsWith('http')
+                  ? 'terra-btn-primary'
+                  : 'terra-btn-outline opacity-50 pointer-events-none'
+              }`}
             >
               🏪 View at Retailer
             </a>
@@ -1227,10 +1231,14 @@ function AlternativesTab({
                   ))}
                 </div>
               )}
-              {alt.product?.url && (
+              {alt.product?.url && alt.product.url.startsWith('http') ? (
                 <a href={alt.product.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-terra-600 hover:text-terra-700 font-medium">
                   🏪 View at {alt.product.retailer} →
                 </a>
+              ) : (
+                <span className="mt-2 inline-block text-xs text-gray-400 italic">
+                  Product link unavailable
+                </span>
               )}
             </div>
           ))}
@@ -1258,10 +1266,14 @@ function AlternativesTab({
                   ))}
                 </div>
               )}
-              {alt.product?.url && (
+              {alt.product?.url && alt.product.url.startsWith('http') ? (
                 <a href={alt.product.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-terra-600 hover:text-terra-700 font-medium">
                   🏪 View at {alt.product.retailer} →
                 </a>
+              ) : (
+                <span className="mt-2 inline-block text-xs text-gray-400 italic">
+                  Product link unavailable
+                </span>
               )}
             </div>
           ))}
