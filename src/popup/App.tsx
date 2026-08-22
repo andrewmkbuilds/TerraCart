@@ -108,7 +108,7 @@ export function PopupApp() {
       {/* Header */}
       <div className="p-5 pb-4 bg-gradient-to-br from-terra-600 to-terra-800 text-white">
         <div className="flex items-center gap-3 mb-3">
-          <span className="text-3xl">🌍</span>
+          <img src="/icons/icon48.png" alt="TerraCart" className="w-12 h-12" />
           <div>
             <h1 className="text-xl font-bold">TerraCart</h1>
             <p className="text-sm text-terra-100">Your AI Shopping Copilot</p>

@@ -488,7 +488,7 @@ export function App() {
       <header className="bg-white border-b border-gray-100 px-4 py-3 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-lg">🌍</span>
+            <img src="/icons/icon48.png" alt="TerraCart" className="w-8 h-8" />
             <div>
               <h1 className="font-bold text-sm text-gray-900">TerraCart</h1>
               <p className="text-[10px] text-gray-400">Your AI Shopping Copilot</p>
@@ -1660,7 +1660,7 @@ function HistoryPanel({ onBack, onAnalyze }: { onBack: () => void; onAnalyze: (p
 function EmptyState({ onScan, showGeminiPrompt, onSetupGemini }: { onScan: () => void; showGeminiPrompt?: boolean; onSetupGemini?: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-      <div className="text-5xl mb-4">🌍</div>
+      <img src="/icons/icon128.png" alt="TerraCart" className="w-20 h-20 mb-4" />
       <h2 className="text-lg font-bold text-gray-800 mb-2">Welcome to TerraCart</h2>
       <p className="text-sm text-gray-500 leading-relaxed mb-4">
         Your AI Copilot for Smarter Shopping. Visit a shopping website and TerraCart will analyze products automatically.

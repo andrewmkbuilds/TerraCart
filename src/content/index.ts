@@ -326,9 +326,15 @@ if ((window as any).__terracartInitialized) {
       background: 'linear-gradient(135deg, #16a34a, #15803d)',
       border: '3px solid white', boxShadow: '0 4px 14px rgba(22, 163, 74, 0.4)',
       cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: '24px', transition: 'transform 0.2s, box-shadow 0.2s',
+      transition: 'transform 0.2s, box-shadow 0.2s',
     })
-    btn.textContent = '🌍'
+    const btnImg = document.createElement('img')
+    btnImg.src = chrome.runtime.getURL('icons/icon48.png')
+    btnImg.alt = 'TerraCart'
+    btnImg.style.width = '32px'
+    btnImg.style.height = '32px'
+    btnImg.style.borderRadius = '50%'
+    btn.appendChild(btnImg)
     container.appendChild(btn)
 
     if (!document.getElementById('terracart-styles')) {
@@ -428,7 +434,7 @@ if ((window as any).__terracartInitialized) {
     toast.id = 'terracart-auto-open-toast'
     toast.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:16px">🌍</span>
+        <img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="TerraCart" style="width:24px;height:24px;border-radius:50%" />
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:12px;color:#1a1a1a">TerraCart detected a shopping site</div>
           <div style="font-size:11px;color:#6b7280;margin-top:1px">Opening analysis panel...</div>
