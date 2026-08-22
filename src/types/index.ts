@@ -120,6 +120,8 @@ export interface Alternative {
   }
   type: 'reusable' | 'refillable' | 'durable' | 'minimal-packaging' | 'better-materials' | 'longer-lasting' | 'similar'
   priority: 'high' | 'medium' | 'low'
+  productUrl?: string
+  sourceUrl?: string
 }
 
 // ---- Research ----

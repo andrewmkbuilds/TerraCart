@@ -876,9 +876,9 @@ function ResearchAlternativesButton({
         if (result.research.alternatives) {
           for (const alt of result.research.alternatives) {
             alternatives.push({
-              productId: alt.url || alt.name,
+              productId: alt.productUrl || alt.name,
               product: {
-                id: alt.url || alt.name,
+                id: alt.productUrl || alt.name,
                 name: alt.name,
                 brand: alt.brand,
                 price: 0,
@@ -898,7 +898,7 @@ function ResearchAlternativesButton({
                 rating: 0,
                 reviewCount: 0,
                 availability: 'unknown' as const,
-                url: alt.url,
+                url: alt.productUrl,
                 features: alt.characteristics,
               },
               reason: alt.reason,
@@ -916,9 +916,9 @@ function ResearchAlternativesButton({
         if (result.research.reusableAlternatives) {
           for (const alt of result.research.reusableAlternatives) {
             alternatives.push({
-              productId: alt.url || alt.name,
+              productId: alt.productUrl || alt.name,
               product: {
-                id: alt.url || alt.name,
+                id: alt.productUrl || alt.name,
                 name: alt.name,
                 brand: alt.brand,
                 price: 0,
@@ -938,7 +938,7 @@ function ResearchAlternativesButton({
                 rating: 0,
                 reviewCount: 0,
                 availability: 'unknown' as const,
-                url: alt.url,
+                url: alt.productUrl,
               },
               reason: alt.reason,
               improvementAreas: ['Reusable alternative', 'Designed for repeated use'],
@@ -1051,23 +1051,26 @@ function AlternativesTab({
   const [researchSources, setResearchSources] = useState<Array<{ name: string; url: string }>>([])
 
   const handleDeepResearch = async (type: 'alternatives' | 'reusable' | 'packaging' | 'all') => {
+    console.log('TerraCart: Starting research', { type, product: product?.name })
+    
     setResearchState('researching')
-    setResearchStatus([])
+    setResearchStatus(['Connecting to Gemini AI...'])
     setResearchError(null)
 
-    const steps = [
-      'Searching the web...',
-      'Finding real products...',
-      'Checking sustainability data...',
-      'Comparing options...',
-      'Preparing results...',
-    ]
-    for (let i = 0; i < steps.length; i++) {
-      await new Promise(r => setTimeout(r, 500 + Math.random() * 400))
-      setResearchStatus(prev => [...prev, steps[i]])
-    }
+    // Show real progress at intervals while API call is in-flight
+    const timers: ReturnType<typeof setTimeout>[] = []
+    timers.push(setTimeout(() => {
+      setResearchStatus(prev => [...prev, 'Searching the web for alternatives...'])
+    }, 3000))
+    timers.push(setTimeout(() => {
+      setResearchStatus(prev => [...prev, 'Analyzing findings...'])
+    }, 6000))
+    timers.push(setTimeout(() => {
+      setResearchStatus(prev => [...prev, 'Preparing recommendations...'])
+    }, 9000))
 
     try {
+      console.log('TerraCart: Sending GEMINI_RESEARCH request...')
       const result = await sendMessage({
         type: 'GEMINI_RESEARCH',
         product,
@@ -1078,6 +1081,7 @@ function AlternativesTab({
       console.log('TerraCart: Research result received:', result)
 
       if (!result) {
+        console.error('TerraCart: No response from background')
         setResearchError('No response from background. Make sure the extension is loaded and the page is a shopping site.')
         setResearchState('error')
         return
@@ -1090,101 +1094,108 @@ function AlternativesTab({
         return
       }
 
-      if (result.research) {
-        console.log('TerraCart: Research data:', {
-          alternatives: result.research.alternatives?.length || 0,
-          reusableAlternatives: result.research.reusableAlternatives?.length || 0,
-          packagingAlternatives: result.research.packagingAlternatives?.length || 0,
-        })
-        const alts: Alternative[] = []
-        const allSources = result.sources || []
+      if (!result.research) {
+        console.error('TerraCart: No research data in response')
+        setResearchError('Gemini returned an unexpected response. The research feature may be temporarily unavailable.')
+        setResearchState('error')
+        return
+      }
 
-        // Convert alternatives
-        if (result.research.alternatives) {
-          for (const alt of result.research.alternatives) {
-            alts.push({
-              productId: alt.url || alt.name,
-              product: {
-                id: alt.url || alt.name,
-                name: alt.name,
-                brand: alt.brand || '',
-                price: 0,
-                currency: 'AED',
-                image: '',
-                description: alt.reason || '',
-                materials: alt.characteristics || [],
-                category: product.category,
-                packaging: { type: ['unknown'], estimatedWeight: 'moderate', recyclable: 'unknown', containsPlastic: 'unknown', refillable: 'unknown' },
-                retailer: alt.retailer || '',
-                rating: 0,
-                reviewCount: 0,
-                availability: 'unknown',
-                url: alt.url || '',
-                features: alt.characteristics || [],
-              },
-              reason: alt.reason || '',
-              improvementAreas: (alt.characteristics || []).slice(0, 3),
-              scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
-              type: 'similar',
-              priority: 'high',
-            })
-          }
+      console.log('TerraCart: Research data:', {
+        alternatives: result.research.alternatives?.length || 0,
+        reusableAlternatives: result.research.reusableAlternatives?.length || 0,
+        packagingAlternatives: result.research.packagingAlternatives?.length || 0,
+      })
+      
+      const alts: Alternative[] = []
+      const allSources = result.sources || []
+
+      // Convert alternatives
+      if (result.research.alternatives) {
+        for (const alt of result.research.alternatives) {
+          alts.push({
+            productId: alt.productUrl || alt.name,
+            product: {
+              id: alt.productUrl || alt.name,
+              name: alt.name,
+              brand: alt.brand || '',
+              price: 0,
+              currency: 'AED',
+              image: '',
+              description: alt.reason || '',
+              materials: alt.characteristics || [],
+              category: product.category,
+              packaging: { type: ['unknown'], estimatedWeight: 'moderate', recyclable: 'unknown', containsPlastic: 'unknown', refillable: 'unknown' },
+              retailer: alt.retailer || '',
+              rating: 0,
+              reviewCount: 0,
+              availability: 'unknown',
+              url: alt.productUrl || '',
+              features: alt.characteristics || [],
+            },
+            reason: alt.reason || '',
+            improvementAreas: (alt.characteristics || []).slice(0, 3),
+            scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+            type: 'similar',
+            priority: 'high',
+          })
         }
+      }
 
-        // Convert reusable alternatives
-        if (result.research.reusableAlternatives) {
-          for (const alt of result.research.reusableAlternatives) {
-            alts.push({
-              productId: alt.url || alt.name,
-              product: {
-                id: alt.url || alt.name,
-                name: alt.name,
-                brand: alt.brand || '',
-                price: 0,
-                currency: 'AED',
-                image: '',
-                description: alt.reason || '',
-                materials: alt.characteristics || [],
-                category: product.category,
-                packaging: { type: ['mixed'], estimatedWeight: 'moderate', recyclable: 'unknown', containsPlastic: 'unknown', refillable: true },
-                retailer: alt.retailer || '',
-                rating: 0,
-                reviewCount: 0,
-                availability: 'unknown',
-                url: alt.url || '',
-                features: alt.characteristics || [],
-              },
-              reason: alt.reason || '',
-              improvementAreas: (alt.characteristics || []).slice(0, 3),
-              scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
-              type: 'reusable',
-              priority: 'high',
-            })
-          }
+      // Convert reusable alternatives
+      if (result.research.reusableAlternatives) {
+        for (const alt of result.research.reusableAlternatives) {
+          alts.push({
+            productId: alt.productUrl || alt.name,
+            product: {
+              id: alt.productUrl || alt.name,
+              name: alt.name,
+              brand: alt.brand || '',
+              price: 0,
+              currency: 'AED',
+              image: '',
+              description: alt.reason || '',
+              materials: alt.characteristics || [],
+              category: product.category,
+              packaging: { type: ['mixed'], estimatedWeight: 'moderate', recyclable: 'unknown', containsPlastic: 'unknown', refillable: true },
+              retailer: alt.retailer || '',
+              rating: 0,
+              reviewCount: 0,
+              availability: 'unknown',
+              url: alt.productUrl || '',
+              features: alt.characteristics || [],
+            },
+            reason: alt.reason || '',
+            improvementAreas: (alt.characteristics || []).slice(0, 3),
+            scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+            type: 'reusable',
+            priority: 'high',
+          })
         }
+      }
 
-        // Convert packaging alternatives
-        if (result.research.packagingAlternatives) {
-          for (const alt of result.research.packagingAlternatives) {
-            alts.push({
-              productId: alt.url || alt.description,
-              product: {
-                id: alt.url || alt.description,
-                name: alt.description || 'Packaging alternative',
-                brand: '',
-                price: 0,
-                currency: 'AED',
-                image: '',
-                description: alt.description || '',
-                materials: [],
-                category: product.category,
-                packaging: { type: ['none'], estimatedWeight: 'light', recyclable: true, containsPlastic: false, refillable: 'unknown' },
-                retailer: alt.retailer || '',
-                rating: 0,
-                reviewCount: 0,
-                availability: 'unknown',
-                url: alt.url || '',
-                features: [],
+      // Convert packaging alternatives
+      if (result.research.packagingAlternatives) {
+        for (const alt of result.research.packagingAlternatives) {
+          alts.push({
+            productId: alt.productUrl || alt.description,
+            product: {
+              id: alt.productUrl || alt.description,
+              name: alt.description || 'Packaging alternative',
+              brand: '',
+              price: 0,
+              currency: 'AED',
+              image: '',
+              description: alt.description || '',
+              materials: [],
+              category: product.category,
+              packaging: { type: ['none'], estimatedWeight: 'light', recyclable: true, containsPlastic: false, refillable: 'unknown' },
+              retailer: alt.retailer || '',
+              rating: 0,
+              reviewCount: 0,
+              availability: 'unknown',
+              url: alt.productUrl || '',
+              features: [],
               },
               reason: alt.description || '',
               improvementAreas: ['Lower packaging'],
@@ -1198,14 +1209,20 @@ function AlternativesTab({
         setWebAlternatives(prev => [...prev, ...alts])
         setResearchSources(allSources)
         console.log('TerraCart: Updated webAlternatives, total count:', alts.length)
-      } else {
-        console.log('TerraCart: No research data in result')
-      }
-
-      setResearchState('done')
+        
+        if (alts.length === 0) {
+          setResearchError('Research completed but no verified alternatives were found for this product.')
+          setResearchState('error')
+        } else {
+          setResearchState('done')
+        }
     } catch (err: any) {
-      setResearchError(err?.message || 'Research failed')
+      console.error('TerraCart: handleDeepResearch exception:', err)
+      setResearchError('Research failed: ' + (err?.message || String(err)))
       setResearchState('error')
+    } finally {
+      console.log('TerraCart: Research complete, cleaning up')
+      timers.forEach(t => clearTimeout(t))
     }
   }
 

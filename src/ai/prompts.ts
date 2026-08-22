@@ -193,7 +193,8 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
       "brand": "<brand name>",
       "retailer": "<where it's sold>",
       "price": "<price if found, otherwise 'Price unavailable'>",
-      "url": "<actual product page URL>",
+      "productUrl": "<actual product page URL. DO NOT use the original product's URL>",
+      "sourceUrl": "<URL of the webpage/article where you found this information>",
       "reason": "<why this might be better>",
       "ecoScore": <number 0-10 or null if uncertain>,
       "characteristics": ["<key feature 1>", "<key feature 2>"]
@@ -202,7 +203,8 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
   "packagingAlternatives": [
     {
       "description": "<description of packaging alternative>",
-      "url": "<URL if found>",
+      "productUrl": "<actual product page URL. DO NOT use the original product's URL>",
+      "sourceUrl": "<URL of the webpage/article where you found this information>",
       "retailer": "<retailer name>"
     }
   ],
@@ -212,7 +214,8 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
       "brand": "<brand>",
       "retailer": "<retailer>",
       "price": "<price>",
-      "url": "<URL>",
+      "productUrl": "<actual product page URL. DO NOT use the original product's URL>",
+      "sourceUrl": "<URL of the webpage/article where you found this information>",
       "reason": "<why reusable alternative>"
     }
   ],
