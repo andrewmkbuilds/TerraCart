@@ -177,79 +177,49 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     }
 
     case 'SCAN_PAGE': {
-      chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      // MUST use non-async callback so return true keeps the channel open
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs[0]
         if (!tab?.id) {
-          sendResponse({ error: 'No active tab found' })
+          sendResponse({ error: 'No active tab found', type: 'other', products: [], retailer: '', pageTitle: '', timestamp: Date.now() })
           return
         }
+        const tabId = tab.id
         if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('edge://'))) {
-          sendResponse({ error: 'Cannot scan browser pages. Navigate to a website first.' })
+          sendResponse({ error: 'Cannot scan browser pages. Navigate to a website first.', type: 'other', products: [], retailer: '', pageTitle: tab.title || '', timestamp: Date.now() })
           return
         }
-        try {
-          // Try sending directly first
-          const result = await new Promise<any>((resolve) => {
-            chrome.tabs.sendMessage(tab.id!, { type: 'SCAN_PAGE' }, (r) => {
-              if (chrome.runtime.lastError) resolve(null)
-              else resolve(r)
-            })
-          })
-          if (result && !result.error) {
-            sendResponse(result)
-          } else {
-            // Content script not loaded — inject it programmatically
+        // Try sending to content script
+        chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (result) => {
+          if (chrome.runtime.lastError || !result) {
+            // Content script not loaded — inject it
             console.log('TerraCart BG: Content script not responding, injecting...')
-            try {
-              await chrome.scripting.executeScript({
-                target: { tabId: tab.id! },
-                files: ['content.js'],
-              })
-              // Wait for script to initialize
-              await new Promise(r => setTimeout(r, 500))
-              // Retry scan
-              const retryResult = await new Promise<any>((resolve) => {
-                chrome.tabs.sendMessage(tab.id!, { type: 'SCAN_PAGE' }, (r) => {
-                  if (chrome.runtime.lastError) resolve(null)
-                  else resolve(r)
+            chrome.scripting.executeScript({
+              target: { tabId },
+              files: ['content.js'],
+            }, () => {
+              // Wait for init then retry
+              setTimeout(() => {
+                chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (retryResult) => {
+                  if (chrome.runtime.lastError || !retryResult) {
+                    sendResponse({
+                      type: 'other',
+                      products: [],
+                      primaryProduct: null,
+                      retailer: tab.url ? new URL(tab.url).hostname : '',
+                      pageTitle: tab.title || '',
+                      timestamp: Date.now(),
+                    })
+                  } else {
+                    sendResponse(retryResult)
+                  }
                 })
-              })
-              if (retryResult && !retryResult.error) {
-                sendResponse(retryResult)
-              } else {
-                // If still no product, return an empty result so the sidepanel shows feedback
-                sendResponse({
-                  type: 'other',
-                  products: [],
-                  primaryProduct: null,
-                  retailer: new URL(tab.url || 'about:blank').hostname,
-                  pageTitle: tab.title || '',
-                  timestamp: Date.now(),
-                })
-              }
-            } catch (injectErr) {
-              console.error('TerraCart BG: Failed to inject content script:', injectErr)
-              sendResponse({
-                error: 'Could not scan this page. Try refreshing the page and scanning again.',
-                type: 'other',
-                products: [],
-                retailer: '',
-                pageTitle: tab.title || '',
-                timestamp: Date.now(),
-              })
-            }
+              }, 600)
+            })
+          } else {
+            sendResponse(result)
           }
-        } catch (err) {
-          console.error('TerraCart BG: SCAN_PAGE failed:', err)
-          sendResponse({
-            error: 'Scan failed: ' + String(err),
-            type: 'other',
-            products: [],
-            retailer: '',
-            pageTitle: tab.title || '',
-            timestamp: Date.now(),
-          })
-        }
+        })
       })
       return true
     }
