@@ -62,6 +62,28 @@ function runInitialDetection() {
     return
   }
 
+  // Quick domain check — skip non-shopping sites immediately
+  try {
+    const hostname = new URL(url).hostname.replace('www.', '')
+    const blocklist = [
+      'google.com', 'gemini.google.com', 'chatgpt.com', 'openai.com',
+      'youtube.com', 'gmail.com', 'github.com', 'gitlab.com',
+      'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+      'linkedin.com', 'reddit.com', 'tiktok.com', 'notion.so',
+      'spotify.com', 'netflix.com', 'twitch.tv', 'wikipedia.org',
+      'medium.com', 'slack.com', 'discord.com', 'teams.microsoft.com',
+      'zoom.us', 'meet.google.com', 'claude.ai', 'perplexity.ai',
+      'docs.google.com', 'drive.google.com', 'calendar.google.com',
+      'maps.google.com', 'stackoverflow.com', 'figma.com', 'canva.com',
+      'dropbox.com', 'trello.com', 'asana.com', 'jira.atlassian.com',
+      'chat.openai.com', 'bitbucket.org', 'pinterest.com',
+      'substack.com', 'stackexchange.com', 'onedrive.live.com',
+    ]
+    if (blocklist.some(d => hostname === d || hostname.endsWith('.' + d))) {
+      return // Never activate on non-shopping sites
+    }
+  } catch { /* continue with detection */ }
+
   // Full e-commerce detection via DOM signals
   // Wait a moment for DOM to settle
   setTimeout(() => {

@@ -27,13 +27,54 @@ export type ECommercePlatform =
   | 'ecwid' | 'shopware' | 'opencart' | 'custom'
 
 // Confidence threshold to consider a site as e-commerce
-const CONFIDENCE_THRESHOLD = 35
+const CONFIDENCE_THRESHOLD = 55
+
+// Blocklist: known non-e-commerce sites where the detector should never activate
+const NON_ECOMMERCE_BLOCKLIST = [
+  'google.com', 'gemini.google.com', 'chatgpt.com', 'openai.com',
+  'youtube.com', 'gmail.com', 'docs.google.com', 'drive.google.com',
+  'calendar.google.com', 'maps.google.com',
+  'github.com', 'gitlab.com', 'bitbucket.org',
+  'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
+  'linkedin.com', 'reddit.com', 'tiktok.com', 'pinterest.com',
+  'slack.com', 'discord.com', 'teams.microsoft.com',
+  'notion.so', 'airtable.com', 'figma.com', 'canva.com',
+  'spotify.com', 'netflix.com', 'twitch.tv',
+  'wikipedia.org', 'medium.com', 'substack.com',
+  'stackoverflow.com', 'stackexchange.com',
+  'zoom.us', 'meet.google.com',
+  'chat.openai.com', 'claude.ai', 'perplexity.ai',
+  'dropbox.com', 'onedrive.live.com',
+  'trello.com', 'asana.com', 'jira.atlassian.com',
+]
+
+function isBlocklistedDomain(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.replace('www.', '')
+    return NON_ECOMMERCE_BLOCKLIST.some(d => hostname === d || hostname.endsWith('.' + d))
+  } catch {
+    return false
+  }
+}
 
 /**
  * Detect if a page is an e-commerce/shopping site.
  * Runs in content script context with full DOM access.
  */
 export function detectECommerce(doc: Document, url: string): ECommerceDetection {
+  // Fast reject: blocklisted domains are never e-commerce
+  if (isBlocklistedDomain(url)) {
+    return {
+      isECommerce: false,
+      confidence: 0,
+      signals: [{ name: 'Blocklisted Domain', detected: false, weight: 100 }],
+      platform: null,
+      shopifyStore: false,
+      retailerName: '',
+      category: 'other',
+    }
+  }
+
   const signals: DetectionSignal[] = []
   let totalWeight = 0
   let detectedWeight = 0
@@ -178,20 +219,12 @@ function detectCartElements(doc: Document): DetectionSignal {
     'button[class*="add-to-cart"]',
     'button[class*="addToCart"]',
     'button[class*="add_to_cart"]',
-    'input[value*="Add to Cart"]',
-    'input[value*="add to cart"]',
-    'button[data-action*="add-to-cart"]',
-    '[class*="add-to-cart"]',
-    '[class*="addToCart"]',
-    '[class*="add_to_cart"]',
-    '[id*="add-to-cart"]',
-    '[id*="addToCart"]',
+    'input[value="Add to Cart"]',
+    'button[data-action="add-to-cart"]',
+    '[id="add-to-cart"]',
+    '[id="addToCart"]',
     'button[class*="buy-now"]',
     'button[class*="buyNow"]',
-    'a[href*="/cart"]',
-    'a[href*="/checkout"]',
-    '[class*="buy-button"]',
-    '[class*="buyButton"]',
   ]
 
   for (const sel of cartSelectors) {
@@ -224,12 +257,15 @@ function detectCartElements(doc: Document): DetectionSignal {
 
 function detectPriceElements(doc: Document): DetectionSignal {
   const priceSelectors = [
-    '[class*="price"]:not([class*="pricing-breakdown"])',
     '[data-price]',
     '[itemprop="price"]',
-    '[class*="Price"]',
-    'span[class*="amount"]',
     '[class*="product-price"]',
+    '[class*="product_price"]',
+    '[class*="item-price"]',
+    '[class*="sale-price"]',
+    '[class*="current-price"]',
+    'span[class*="price-value"]',
+    'span[class*="priceAmount"]',
   ]
 
   let priceFound = false
@@ -268,23 +304,23 @@ function detectPriceElements(doc: Document): DetectionSignal {
 
 function detectProductStructure(doc: Document): DetectionSignal {
   const signals = [
-    // Product title
-    doc.querySelector('h1[class*="product"], h1[class*="Product"], [class*="product-title"], [class*="ProductName"], [itemprop="name"]'),
-    // Product image gallery
-    doc.querySelector('[class*="product-gallery"], [class*="productGallery"], [class*="product-images"], [class*="productImages"], [class*="gallery"]'),
-    // Variant/size/color selectors
-    doc.querySelector('[class*="variant"], [class*="Variant"], [class*="size-selector"], [class*="color-selector"], select[class*="option"]'),
+    // Product title (must be specific)
+    doc.querySelector('h1[class*="product-title"], h1[class*="product-title"], [class*="ProductName"], [itemprop="name"][class*="product"]'),
+    // Product image gallery (must be specific to product, not any gallery)
+    doc.querySelector('[class*="product-gallery"], [class*="productGallery"], [class*="product-images"], [class*="productImages"]'),
+    // Variant/size/color selectors (specific to e-commerce)
+    doc.querySelector('[class*="size-selector"], [class*="color-selector"], [class*="variant-selector"], select[class*="option"][name*="option"]'),
     // Quantity selector
-    doc.querySelector('[class*="quantity"], [class*="Quantity"], input[type="number"][class*="qty"], input[name="quantity"]'),
+    doc.querySelector('input[type="number"][class*="qty"], input[name="quantity"], [class*="quantity-selector"]'),
   ]
 
   const found = signals.filter(Boolean).length
 
   return {
     name: 'Product Detail Structure',
-    detected: found >= 2,
+    detected: found >= 3,
     weight: 15,
-    evidence: found >= 2 ? `${found} product structure elements found` : undefined,
+    evidence: found >= 3 ? `${found} product structure elements found` : undefined,
   }
 }
 
@@ -377,10 +413,6 @@ function detectProductGrid(doc: Document): DetectionSignal {
     '[class*="productGrid"]',
     '[class*="product-list"]',
     '[class*="productList"]',
-    '[class*="product-grid"]',
-    '[class*="collection"]',
-    '[class*="search-results"]',
-    '[class*="searchResults"]',
     '[data-product-id]',
     '[data-product]',
     '.product-card',
