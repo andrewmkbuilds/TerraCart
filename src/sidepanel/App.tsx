@@ -883,10 +883,12 @@ function AlternativesTab({
   analysis: ProductAnalysis
   onSelectProduct: (p: Product) => void
 }) {
-  const { preferences } = useTerraStore()
+  const { preferences, setProductAnalysis, currentProductAnalysis } = useTerraStore()
   const [researchState, setResearchState] = useState<'idle' | 'researching' | 'done' | 'error'>('idle')
   const [researchStatus, setResearchStatus] = useState<string[]>([])
   const [researchError, setResearchError] = useState<string | null>(null)
+  const [webAlternatives, setWebAlternatives] = useState<Alternative[]>([])
+  const [researchSources, setResearchSources] = useState<Array<{ name: string; url: string }>>([])
 
   const handleDeepResearch = async (type: 'alternatives' | 'reusable' | 'packaging' | 'all') => {
     setResearchState('researching')
@@ -913,14 +915,125 @@ function AlternativesTab({
         researchType: type,
       })
 
-      if (result?.error) {
+      if (!result) {
+        setResearchError('No response from background. Make sure the extension is loaded and the page is a shopping site.')
+        setResearchState('error')
+        return
+      }
+
+      if (result.error) {
         setResearchError(result.error)
         setResearchState('error')
         return
       }
 
+      if (result.research) {
+        const alts: Alternative[] = []
+        const allSources = result.sources || []
+
+        // Convert alternatives
+        if (result.research.alternatives) {
+          for (const alt of result.research.alternatives) {
+            alts.push({
+              productId: alt.url || alt.name,
+              product: {
+                id: alt.url || alt.name,
+                name: alt.name,
+                brand: alt.brand || '',
+                price: 0,
+                currency: 'AED',
+                image: '',
+                description: alt.reason || '',
+                materials: alt.characteristics || [],
+                category: product.category,
+                packaging: { type: ['unknown'], estimatedWeight: 'moderate', recyclable: 'unknown', containsPlastic: 'unknown', refillable: 'unknown' },
+                retailer: alt.retailer || '',
+                rating: 0,
+                reviewCount: 0,
+                availability: 'unknown',
+                url: alt.url || '',
+                features: alt.characteristics || [],
+              },
+              reason: alt.reason || '',
+              improvementAreas: (alt.characteristics || []).slice(0, 3),
+              scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+              type: 'similar',
+              priority: 'high',
+            })
+          }
+        }
+
+        // Convert reusable alternatives
+        if (result.research.reusableAlternatives) {
+          for (const alt of result.research.reusableAlternatives) {
+            alts.push({
+              productId: alt.url || alt.name,
+              product: {
+                id: alt.url || alt.name,
+                name: alt.name,
+                brand: alt.brand || '',
+                price: 0,
+                currency: 'AED',
+                image: '',
+                description: alt.reason || '',
+                materials: alt.characteristics || [],
+                category: product.category,
+                packaging: { type: ['mixed'], estimatedWeight: 'moderate', recyclable: 'unknown', containsPlastic: 'unknown', refillable: true },
+                retailer: alt.retailer || '',
+                rating: 0,
+                reviewCount: 0,
+                availability: 'unknown',
+                url: alt.url || '',
+                features: alt.characteristics || [],
+              },
+              reason: alt.reason || '',
+              improvementAreas: (alt.characteristics || []).slice(0, 3),
+              scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+              type: 'reusable',
+              priority: 'high',
+            })
+          }
+        }
+
+        // Convert packaging alternatives
+        if (result.research.packagingAlternatives) {
+          for (const alt of result.research.packagingAlternatives) {
+            alts.push({
+              productId: alt.url || alt.name,
+              product: {
+                id: alt.url || alt.name,
+                name: alt.name,
+                brand: alt.brand || '',
+                price: 0,
+                currency: 'AED',
+                image: '',
+                description: alt.reason || '',
+                materials: alt.characteristics || [],
+                category: product.category,
+                packaging: { type: ['none'], estimatedWeight: 'light', recyclable: true, containsPlastic: false, refillable: 'unknown' },
+                retailer: alt.retailer || '',
+                rating: 0,
+                reviewCount: 0,
+                availability: 'unknown',
+                url: alt.url || '',
+                features: alt.characteristics || [],
+              },
+              reason: alt.reason || '',
+              improvementAreas: (alt.characteristics || []).slice(0, 3),
+              scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+              type: 'similar',
+              priority: 'medium',
+            })
+          }
+        }
+
+        setWebAlternatives(prev => [...prev, ...alts])
+        setResearchSources(allSources)
+      }
+
       setResearchState('done')
-    } catch {
+    } catch (err: any) {
+      setResearchError(err?.message || 'Research failed')
       setResearchState('error')
     }
   }
@@ -1002,7 +1115,51 @@ function AlternativesTab({
         </div>
       )}
 
-      {analysis.alternatives.length === 0 && researchState !== 'researching' && (
+      {/* Web research results */}
+      {webAlternatives.length > 0 && (
+        <div className="space-y-3">
+          <div className="terra-label">🌐 Web Research Results</div>
+          {webAlternatives.map((alt) => (
+            <div key={alt.productId} className="terra-card p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`terra-badge text-[10px] ${alt.priority === 'high' ? 'bg-terra-50 text-terra-700 border border-terra-200' : alt.priority === 'medium' ? 'bg-sand-50 text-sand-700 border border-sand-200' : 'bg-gray-50 text-gray-500 border border-gray-200'}`}>
+                  {alt.priority} priority
+                </span>
+                <span className="terra-badge text-[10px] bg-purple-50 text-purple-600 border border-purple-100">{alt.type}</span>
+              </div>
+              {alt.product && <ProductCard product={alt.product} ecoScore={alt.scoreComparison.alternative} compact onClick={() => onSelectProduct(alt.product!)} />}
+              <div className="mt-2 text-xs text-gray-500">{alt.reason}</div>
+              {alt.improvementAreas.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {alt.improvementAreas.map((area, i) => (
+                    <span key={i} className="terra-chip text-[10px] bg-green-50 text-green-600 border-green-100">✓ {area}</span>
+                  ))}
+                </div>
+              )}
+              {alt.product?.url && (
+                <a href={alt.product.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-terra-600 hover:text-terra-700 font-medium">
+                  🏪 View at {alt.product.retailer} →
+                </a>
+              )}
+            </div>
+          ))}
+          {/* Sources */}
+          {researchSources.length > 0 && (
+            <div className="terra-card p-3">
+              <div className="terra-label mb-2 text-[10px]">📚 Sources</div>
+              <div className="flex flex-wrap gap-1">
+                {researchSources.map((src, i) => (
+                  <a key={i} href={src.url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-terra-600 hover:text-terra-700 underline truncate max-w-[150px]" title={src.url}>
+                    {src.name || new URL(src.url).hostname}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {analysis.alternatives.length === 0 && webAlternatives.length === 0 && researchState !== 'researching' && (
         <div className="terra-card p-6 text-center">
           <div className="text-3xl mb-2">🔍</div>
           <p className="text-sm text-gray-500 mb-2">No alternatives found yet.</p>
