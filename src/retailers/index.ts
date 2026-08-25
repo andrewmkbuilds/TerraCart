@@ -5,7 +5,14 @@ import { noonAdapter } from './noon'
 import { walmartAdapter } from './walmart'
 import { uaeFashionAdapter } from './uae-fashion'
 import { genericAdapter } from './generic'
-import { detectECommerce, type ECommerceDetection } from './detector'
+import { detectECommerce, isProductPage, type ECommerceDetection } from './detector'
+import {
+  isHardBlockedHost,
+  isKnownShoppingHost,
+  isEcommerceSite,
+  evaluateSiteGate,
+  looksLikeProductUrl,
+} from './site-gate'
 
 /**
  * Retailer adapters in priority order.
@@ -100,12 +107,7 @@ export function detectECommerceSite(doc: Document, url: string): ECommerceDetect
  * No DOM analysis needed — just URL matching.
  */
 export function isKnownShoppingSite(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname.replace('www.', '')
-    return KNOWN_SHOPPING_DOMAINS.has(hostname) || KNOWN_SHOPPING_DOMAINS.has('www.' + hostname)
-  } catch {
-    return false
-  }
+  return isKnownShoppingHost(url)
 }
 
 /**
@@ -113,14 +115,14 @@ export function isKnownShoppingSite(url: string): boolean {
  * First checks known domains, then falls back to e-commerce detection.
  */
 export function shouldActivate(doc: Document, url: string): { activate: boolean; detection: ECommerceDetection | null } {
-  // Fast path: known domain
-  if (isKnownShoppingSite(url)) {
+  if (isHardBlockedHost(url)) {
+    return { activate: false, detection: null }
+  }
+  if (isKnownShoppingHost(url)) {
     return { activate: true, detection: null }
   }
-
-  // Full detection via DOM analysis
   const detection = detectECommerce(doc, url)
-  return { activate: detection.isECommerce, detection }
+  return { activate: isEcommerceSite(url, detection), detection }
 }
 
 /**
@@ -138,4 +140,5 @@ export function isShoppingSite(url: string): boolean {
 }
 
 export type { RetailerAdapter }
-export { ECommerceDetection }
+export { ECommerceDetection, isProductPage }
+export { isHardBlockedHost, isEcommerceSite, evaluateSiteGate } from './site-gate'

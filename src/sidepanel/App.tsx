@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useTerraStore } from '../store'
 import { EcoScoreRing, ScoreBreakdown } from '../components/shared/EcoScoreRing'
 import { VerdictBadge } from '../components/shared/VerdictBadge'
@@ -60,6 +60,42 @@ function sendMessage(message: Record<string, unknown>, timeoutMs = 30000): Promi
   })
 }
 
+function getVerifiedAlternativeUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) return null
+  try {
+    const url = new URL(value)
+    return url.href
+  } catch {
+    return null
+  }
+}
+
+function AlternativeRetailerLink({ alternative }: { alternative: Alternative }) {
+  const productUrl = getVerifiedAlternativeUrl(alternative.productUrl)
+  if (!productUrl) {
+    return <span className="mt-2 inline-block text-xs text-gray-400 italic">Product link unavailable</span>
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => { void sendMessage({ type: 'OPEN_EXTERNAL_URL', url: productUrl }) }}
+      className="mt-2 inline-block text-xs text-terra-600 hover:text-terra-700 font-medium"
+    >
+      🏪 View at {alternative.product?.retailer || 'Retailer'} →
+    </button>
+  )
+}
+
+function AlternativeSource({ alternative }: { alternative: Alternative }) {
+  const sourceUrl = getVerifiedAlternativeUrl(alternative.sourceUrl)
+  return sourceUrl ? (
+    <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[10px] text-gray-400 underline">
+      Research source
+    </a>
+  ) : null
+}
+
 // ============================================================
 // Main Side Panel App
 // ============================================================
@@ -83,6 +119,12 @@ export function App() {
   const [websiteEnabled, setWebsiteEnabled] = useState(true)
   const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null)
   const [geminiError, setGeminiError] = useState<string | null>(null)
+  const [shoppingDetected, setShoppingDetected] = useState<boolean | null>(null)
+  const [isKnownShopping, setIsKnownShopping] = useState(false)
+  const [siteInactive, setSiteInactive] = useState(false)
+  const [pageType, setPageType] = useState<string | null>(null)
+  const [retailerName, setRetailerName] = useState<string>('')
+  const [scanAttemptedAt, setScanAttemptedAt] = useState<number>(0)
 
   // ---- Check Gemini API key on mount ----
   useEffect(() => {
@@ -100,9 +142,34 @@ export function App() {
   useEffect(() => {
     const listener = (message: any) => {
       if (message.type === 'PAGE_SCANNED' && message.data) {
-        // Don't replace an existing analysis mid-flight
-        if (isAnalyzing) return
-        handleScanData(message.data)
+        const data = message.data
+        const retailer = data.retailer || ''
+        setRetailerName(retailer)
+        const isShopping = data.type === 'product-page' ||
+                          data.type === 'search-results' ||
+                          data.type === 'category-page' ||
+                          (data.productCount || 0) > 0 ||
+                          (data.detection && (data.detection.platform || data.detection.shopifyStore))
+        setShoppingDetected(isShopping)
+        setIsKnownShopping(isShopping)
+        setSiteInactive(!isShopping)
+        if (data.type) setPageType(data.type)
+
+        if (data.primaryProduct) {
+          handleScanData(data)
+        } else if ((data.productCount || 0) > 0) {
+          handleScanData(data)
+        }
+      }
+      if (message.type === 'TAB_DEACTIVATED') {
+        setSiteInactive(true)
+        setDetectedProduct(null)
+        setPageScanResult(null)
+        setProductAnalysis(null)
+        setShoppingDetected(false)
+        setIsKnownShopping(false)
+        setRetailerName('')
+        setPageType(null)
       }
     }
     chrome.runtime?.onMessage?.addListener(listener)
@@ -125,32 +192,90 @@ export function App() {
       if (tabInfo?.url) {
         const enabled = await sendMessage({ type: 'CHECK_WEBSITE_ENABLED', url: tabInfo.url })
         setWebsiteEnabled(enabled?.enabled ?? true)
+        const known = await sendMessage({ type: 'IS_KNOWN_SHOPPING_SITE', url: tabInfo.url })
+        if (known?.known) {
+          setSiteInactive(false)
+          setIsKnownShopping(true)
+          setShoppingDetected(true)
+        } else {
+          setSiteInactive(true)
+          setDetectedProduct(null)
+          setPageScanResult(null)
+          setProductAnalysis(null)
+        }
       }
-      // Try cached data first — note: JSON object keys are strings, tab IDs are numbers
+      // --- 1) Try content script DIRECTLY first (REQUEST_INITIAL_STATE) ---
+      if (tabInfo?.id) {
+        try {
+          const initial: any = await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(null), 4000)
+            try {
+              (chrome as any).tabs?.sendMessage?.(tabInfo.id, { type: 'REQUEST_INITIAL_STATE' }, (resp: any) => {
+                clearTimeout(timer)
+                if (chrome.runtime.lastError) resolve(null)
+                else resolve(resp || null)
+              })
+            } catch { clearTimeout(timer); resolve(null) }
+          })
+          if (initial) {
+            console.log('TerraCart: Direct content script initial state:', initial)
+            setCurrentUrl(initial.url || tabInfo.url || '')
+            if (initial.isKnownShopping || initial.isECommerce) {
+              setSiteInactive(false)
+              setIsKnownShopping(true)
+              setShoppingDetected(true)
+            }
+            if (initial.pageType) setPageType(initial.pageType)
+            if (initial.scanResult) {
+              const r = initial.scanResult
+              setRetailerName(r.retailer || '')
+              const rIsShopping = r.type === 'product-page' || r.type === 'search-results' || r.type === 'category-page' || (r.products?.length || 0) > 0
+              if (rIsShopping) {
+                setSiteInactive(false)
+                setShoppingDetected(true)
+              }
+              if (r.primaryProduct || (r.products && r.products.length > 0)) {
+                handleScanResult(r)
+                setIsScanning(false)
+                setScanAttemptedAt(Date.now())
+                return
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('TerraCart: Direct content script request failed', e)
+        }
+      }
+      // --- 2) Try cached via background ---
       const cachedData = await sendMessage({ type: 'GET_ALL_TAB_SCAN_DATA' })
       console.log('TerraCart: Cached data:', cachedData)
       if (cachedData && tabInfo?.id) {
         const cached = cachedData[tabInfo.id] || cachedData[String(tabInfo.id)] as any
         console.log('TerraCart: Cached for tab:', tabInfo.id, cached)
-        if (cached && (cached.primaryProduct || (cached.products && cached.products.length > 0))) {
-          console.log('TerraCart: Using cached data')
-          handleScanData(cached)
-          setIsScanning(false)
-          return
+        if (cached) {
+          if (cached.retailer) setRetailerName(cached.retailer)
+          if (cached.primaryProduct || (cached.products && cached.products.length > 0)) {
+            console.log('TerraCart: Using cached data')
+            handleScanData(cached)
+            setIsScanning(false)
+            setScanAttemptedAt(Date.now())
+            return
+          }
         }
       }
-      // Fresh scan
+      // --- 3) Fresh scan via background ---
       console.log('TerraCart: Requesting fresh scan')
       const scanResult = await sendMessage({ type: 'SCAN_PAGE' })
       console.log('TerraCart: Scan result:', scanResult)
       if (!scanResult) {
         setGeminiError('No response from background service. Try reloading the extension in chrome://extensions/.')
       } else if (scanResult.error && scanResult.error !== 'Non-shopping site') {
-        // Don't show an error for non-shopping pages — just show the EmptyState
         if (!scanResult.error.includes('Cannot scan') && !scanResult.error.includes('No active tab')) {
           setGeminiError(scanResult.error)
         }
       } else {
+        setSiteInactive(false)
+        if (scanResult.retailer) setRetailerName(scanResult.retailer)
         handleScanResult(scanResult)
       }
     } catch (err: any) {
@@ -158,6 +283,7 @@ export function App() {
       setGeminiError('Scan failed: ' + (err?.message || String(err)))
     } finally {
       setIsScanning(false)
+      setScanAttemptedAt(Date.now())
     }
   }
 
@@ -196,6 +322,14 @@ export function App() {
     if (!result) return
     const products = result.products || []
     setPageScanResult(result)
+    if (result.retailer) setRetailerName(result.retailer)
+    if (result.type) setPageType(result.type)
+    const rIsShopping =
+      result.type === 'product-page' ||
+      result.type === 'search-results' ||
+      result.type === 'category-page' ||
+      products.length > 0
+    if (rIsShopping) setShoppingDetected(true)
     if (result.primaryProduct) {
       console.log('TerraCart: Found primaryProduct in result:', result.primaryProduct.name)
       setDetectedProduct(result.primaryProduct)
@@ -330,9 +464,11 @@ export function App() {
               if (result?.research) {
                 const alts: Alternative[] = []
                 const buildAlt = (a: any, type: string): Alternative => ({
-                  productId: a.url || a.name,
+                  productId: a.productUrl || a.name,
+                  productUrl: getVerifiedAlternativeUrl(a.productUrl) || undefined,
+                  sourceUrl: getVerifiedAlternativeUrl(a.sourceUrl) || undefined,
                   product: {
-                    id: a.url || a.name,
+                    id: a.productUrl || a.name,
                     name: a.name,
                     brand: a.brand || '',
                     price: 0,
@@ -346,7 +482,7 @@ export function App() {
                     rating: 0,
                     reviewCount: 0,
                     availability: 'unknown' as const,
-                    url: a.url || '',
+                    url: getVerifiedAlternativeUrl(a.productUrl) || '',
                     features: a.characteristics || [],
                   },
                   reason: a.reason || '',
@@ -364,14 +500,16 @@ export function App() {
                 if (result.research.packagingAlternatives) {
                   for (const a of result.research.packagingAlternatives) {
                     alts.push({
-                      productId: a.url || a.description,
+                      productId: a.productUrl || a.description,
+                      productUrl: getVerifiedAlternativeUrl(a.productUrl) || undefined,
+                      sourceUrl: getVerifiedAlternativeUrl(a.sourceUrl) || undefined,
                       product: {
-                        id: a.url || a.description,
+                        id: a.productUrl || a.description,
                         name: a.description || 'Packaging alternative',
                         brand: '', price: 0, currency: 'AED', image: '', description: a.description || '',
                         materials: [], category: product.category,
                         packaging: { type: ['none' as const], estimatedWeight: 'light', recyclable: true, containsPlastic: false, refillable: 'unknown' as const },
-                        retailer: a.retailer || '', rating: 0, reviewCount: 0, availability: 'unknown' as const, url: a.url || '',
+                        retailer: a.retailer || '', rating: 0, reviewCount: 0, availability: 'unknown' as const, url: getVerifiedAlternativeUrl(a.productUrl) || '',
                       },
                       reason: a.description || '',
                       improvementAreas: ['Lower packaging'],
@@ -564,13 +702,9 @@ export function App() {
       <main className="flex-1 overflow-y-auto terra-scroll">
         {!websiteEnabled ? (
           <DisabledState hostname={new URL(currentUrl || 'https://example.com').hostname} />
-        ) : !product && !isScanning ? (
-          <EmptyState onScan={requestScan} showGeminiPrompt={false} onSetupGemini={() => setActivePanel('settings')} />
-        ) : isScanning && !analysis ? (
-          <AnalyzingState />
-        ) : !product ? (
-          <EmptyState onScan={requestScan} showGeminiPrompt={false} onSetupGemini={() => setActivePanel('settings')} />
-        ) : (
+        ) : siteInactive ? (
+          <InactiveState />
+        ) : product ? (
           <div className="p-4 space-y-4">
             {/* Gemini error banner */}
             {geminiError && geminiError !== 'GEMINI_API_KEY_MISSING' && (
@@ -617,6 +751,19 @@ export function App() {
               </div>
             )}
           </div>
+        ) : isScanning || (shoppingDetected === null && scanAttemptedAt === 0) ? (
+          <AnalyzingState />
+        ) : (shoppingDetected === true || isKnownShopping) ? (
+          <ShoppingNoProductState
+            retailer={retailerName || (currentUrl ? new URL(currentUrl).hostname.replace('www.', '') : '')}
+            pageType={pageType}
+            onScan={requestScan}
+            showGeminiPrompt={geminiConfigured === false}
+            onSetupGemini={() => setActivePanel('settings')}
+            isAnalyzing={isAnalyzing}
+          />
+        ) : (
+          <EmptyState onScan={requestScan} showGeminiPrompt={geminiConfigured === false} onSetupGemini={() => setActivePanel('settings')} />
         )}
       </main>
 
@@ -796,7 +943,7 @@ function OverviewTab({
       {/* 🔎 Research Better Options — THE KEY BUTTON */}
       {analysis && !isAnalyzing && geminiConfigured && (
         <div className="terra-card p-4 border-terra-200 bg-gradient-to-br from-terra-50 to-emerald-50">
-          <ResearchAlternativesButton product={product} onComplete={onResearchAlternatives} />
+          <ResearchAlternativesButton product={product} analysis={analysis} onComplete={onResearchAlternatives} />
         </div>
       )}
 
@@ -819,9 +966,11 @@ function OverviewTab({
 // ============================================================
 function ResearchAlternativesButton({
   product,
+  analysis,
   onComplete,
 }: {
   product: Product
+  analysis: ProductAnalysis
   onComplete: () => void
 }) {
   const { preferences, setProductAnalysis, currentProductAnalysis } = useTerraStore()
@@ -837,12 +986,12 @@ function ResearchAlternativesButton({
     setIsResearching(true)
     setError(null)
     setResearchStatus([])
+    const currentAnalysis = currentProductAnalysis || analysis
 
     // Verify product exists
-    if (!product || !product.name) {
+    if (!product || !product.name || !product.url || !product.retailer) {
       console.error('TerraCart: No product available for research')
       setError('TerraCart could not identify the current product. Rescan the page and try again.')
-      setIsResearching(false)
       return
     }
 
@@ -878,27 +1027,32 @@ function ResearchAlternativesButton({
         return
       }
 
-      if (result.error) {
+      if (result.success === false || result.error) {
         console.error('TerraCart: Research error:', result.error)
-        setError(result.error)
-        setIsResearching(false)
+        setError(result.error || 'Research failed.')
         return
       }
 
-      if (result.research) {
+      const research = result.research || {
+        alternatives: Array.isArray(result.alternatives) ? result.alternatives : [],
+        reusableAlternatives: [],
+        packagingAlternatives: [],
+      }
+      if (research.alternatives.length || research.reusableAlternatives.length || research.packagingAlternatives.length) {
         console.log('TerraCart: Research data:', {
-          alternatives: result.research.alternatives?.length || 0,
-          reusableAlternatives: result.research.reusableAlternatives?.length || 0,
-          packagingAlternatives: result.research.packagingAlternatives?.length || 0,
+          alternatives: research.alternatives?.length || 0,
+          reusableAlternatives: research.reusableAlternatives?.length || 0,
+          packagingAlternatives: research.packagingAlternatives?.length || 0,
         })
         
         // Convert Gemini research results into Alternative objects
         const alternatives: Alternative[] = []
 
-        if (result.research.alternatives) {
-          for (const alt of result.research.alternatives) {
+        if (research.alternatives) {
+          for (const alt of research.alternatives) {
             alternatives.push({
               productId: alt.productUrl || alt.name,
+              productUrl: getVerifiedAlternativeUrl(alt.productUrl) || undefined,
               product: {
                 id: alt.productUrl || alt.name,
                 name: alt.name,
@@ -920,13 +1074,13 @@ function ResearchAlternativesButton({
                 rating: 0,
                 reviewCount: 0,
                 availability: 'unknown' as const,
-                url: alt.productUrl,
+                url: getVerifiedAlternativeUrl(alt.productUrl) || '',
                 features: alt.characteristics,
               },
               reason: alt.reason,
-              improvementAreas: alt.characteristics.slice(0, 3),
+              improvementAreas: (alt.characteristics || []).slice(0, 3),
               scoreComparison: {
-                original: currentProductAnalysis?.ecoScore.overall || 0,
+                original: currentAnalysis.ecoScore.overall,
                 alternative: alt.ecoScore || 0,
               },
               type: 'similar',
@@ -935,10 +1089,11 @@ function ResearchAlternativesButton({
           }
         }
 
-        if (result.research.reusableAlternatives) {
-          for (const alt of result.research.reusableAlternatives) {
+        if (research.reusableAlternatives) {
+          for (const alt of research.reusableAlternatives) {
             alternatives.push({
               productId: alt.productUrl || alt.name,
+              productUrl: getVerifiedAlternativeUrl(alt.productUrl) || undefined,
               product: {
                 id: alt.productUrl || alt.name,
                 name: alt.name,
@@ -960,12 +1115,12 @@ function ResearchAlternativesButton({
                 rating: 0,
                 reviewCount: 0,
                 availability: 'unknown' as const,
-                url: alt.productUrl,
+                url: getVerifiedAlternativeUrl(alt.productUrl) || '',
               },
               reason: alt.reason,
               improvementAreas: ['Reusable alternative', 'Designed for repeated use'],
               scoreComparison: {
-                original: currentProductAnalysis?.ecoScore.overall || 0,
+                original: currentAnalysis.ecoScore.overall,
                 alternative: alt.ecoScore || 0,
               },
               type: 'reusable',
@@ -977,26 +1132,22 @@ function ResearchAlternativesButton({
         console.log('TerraCart: Processed alternatives:', alternatives.length)
         
         // Update the analysis with real research alternatives
-        if (currentProductAnalysis) {
-          console.log('TerraCart: Updating product analysis with alternatives')
-          setProductAnalysis({
-            ...currentProductAnalysis,
-            alternatives,
-          })
-        } else {
-          console.warn('TerraCart: currentProductAnalysis is null, cannot update alternatives')
-        }
+        console.log('TerraCart: Updating product analysis with alternatives')
+        setProductAnalysis({
+          ...currentAnalysis,
+          alternatives,
+        })
 
         if (alternatives.length === 0) {
           console.log('TerraCart: No alternatives found')
-          setError('Gemini responded but found no alternatives for this product. Try re-analyzing the product first, then research again.')
+          setError(result.researchSummary || 'Research returned no verified alternatives.')
         } else {
           console.log('TerraCart: Research complete, calling onComplete')
           onComplete()
         }
-      } else if (result && !result.error && !result.research) {
+      } else {
         console.error('TerraCart: Unexpected response structure:', result)
-        setError('Gemini returned an unexpected response. The research feature may be temporarily unavailable. Check the browser console for details.')
+        setError(result.researchSummary || 'Research returned no verified alternatives.')
       }
     } catch (err: any) {
       console.error('TerraCart: handleResearch exception:', err)
@@ -1067,17 +1218,31 @@ function AlternativesTab({
 }) {
   const { preferences, setProductAnalysis, currentProductAnalysis } = useTerraStore()
   const [researchState, setResearchState] = useState<'idle' | 'researching' | 'done' | 'error'>('idle')
+  const [researchType, setResearchType] = useState<'all' | 'reusable' | 'packaging' | null>(null)
   const [researchStatus, setResearchStatus] = useState<string[]>([])
   const [researchError, setResearchError] = useState<string | null>(null)
   const [webAlternatives, setWebAlternatives] = useState<Alternative[]>([])
   const [researchSources, setResearchSources] = useState<Array<{ name: string; url: string }>>([])
+  const researchCache = useRef(new Map<string, { alternatives: Alternative[]; sources: Array<{ name: string; url: string }> }>())
 
   const handleDeepResearch = async (type: 'alternatives' | 'reusable' | 'packaging' | 'all') => {
     console.log('TerraCart: Starting research', { type, product: product?.name })
+    const cacheKey = `${product.url || product.id}::${type}`
+    const cached = researchCache.current.get(cacheKey)
+    if (cached) {
+      setWebAlternatives(cached.alternatives)
+      setResearchSources(cached.sources)
+      setResearchState(cached.alternatives.length > 0 ? 'done' : 'error')
+      setResearchError(cached.alternatives.length > 0 ? null : 'Research completed, but no verified alternatives were found.')
+      return
+    }
     
     setResearchState('researching')
+    setResearchType(type === 'alternatives' ? 'all' : type)
     setResearchStatus(['Connecting to Gemini AI...'])
     setResearchError(null)
+    setWebAlternatives([])
+    setResearchSources([])
 
     // Show real progress at intervals while API call is in-flight
     const timers: ReturnType<typeof setTimeout>[] = []
@@ -1109,14 +1274,19 @@ function AlternativesTab({
         return
       }
 
-      if (result.error) {
+      if (result.success === false || result.error) {
         console.error('TerraCart: Research error:', result.error)
         setResearchError(result.error)
         setResearchState('error')
         return
       }
 
-      if (!result.research) {
+      const research = result.research || {
+        alternatives: Array.isArray(result.alternatives) ? result.alternatives : [],
+        reusableAlternatives: [],
+        packagingAlternatives: [],
+      }
+      if (!research.alternatives && !research.reusableAlternatives && !research.packagingAlternatives) {
         console.error('TerraCart: No research data in response')
         setResearchError('Gemini returned an unexpected response. The research feature may be temporarily unavailable.')
         setResearchState('error')
@@ -1124,19 +1294,21 @@ function AlternativesTab({
       }
 
       console.log('TerraCart: Research data:', {
-        alternatives: result.research.alternatives?.length || 0,
-        reusableAlternatives: result.research.reusableAlternatives?.length || 0,
-        packagingAlternatives: result.research.packagingAlternatives?.length || 0,
+        alternatives: research.alternatives?.length || 0,
+        reusableAlternatives: research.reusableAlternatives?.length || 0,
+        packagingAlternatives: research.packagingAlternatives?.length || 0,
       })
       
       const alts: Alternative[] = []
       const allSources = result.sources || []
 
       // Convert alternatives
-      if (result.research.alternatives) {
-        for (const alt of result.research.alternatives) {
+      if (research.alternatives) {
+        for (const alt of research.alternatives) {
           alts.push({
             productId: alt.productUrl || alt.name,
+            productUrl: getVerifiedAlternativeUrl(alt.productUrl) || undefined,
+            sourceUrl: getVerifiedAlternativeUrl(alt.sourceUrl) || undefined,
             product: {
               id: alt.productUrl || alt.name,
               name: alt.name,
@@ -1152,7 +1324,7 @@ function AlternativesTab({
               rating: 0,
               reviewCount: 0,
               availability: 'unknown',
-              url: alt.productUrl || '',
+              url: getVerifiedAlternativeUrl(alt.productUrl) || '',
               features: alt.characteristics || [],
             },
             reason: alt.reason || '',
@@ -1165,10 +1337,12 @@ function AlternativesTab({
       }
 
       // Convert reusable alternatives
-      if (result.research.reusableAlternatives) {
-        for (const alt of result.research.reusableAlternatives) {
+      if (research.reusableAlternatives) {
+        for (const alt of research.reusableAlternatives) {
           alts.push({
             productId: alt.productUrl || alt.name,
+            productUrl: getVerifiedAlternativeUrl(alt.productUrl) || undefined,
+            sourceUrl: getVerifiedAlternativeUrl(alt.sourceUrl) || undefined,
             product: {
               id: alt.productUrl || alt.name,
               name: alt.name,
@@ -1184,7 +1358,7 @@ function AlternativesTab({
               rating: 0,
               reviewCount: 0,
               availability: 'unknown',
-              url: alt.productUrl || '',
+              url: getVerifiedAlternativeUrl(alt.productUrl) || '',
               features: alt.characteristics || [],
             },
             reason: alt.reason || '',
@@ -1197,10 +1371,12 @@ function AlternativesTab({
       }
 
       // Convert packaging alternatives
-      if (result.research.packagingAlternatives) {
-        for (const alt of result.research.packagingAlternatives) {
+      if (research.packagingAlternatives) {
+        for (const alt of research.packagingAlternatives) {
           alts.push({
             productId: alt.productUrl || alt.description,
+            productUrl: getVerifiedAlternativeUrl(alt.productUrl) || undefined,
+            sourceUrl: getVerifiedAlternativeUrl(alt.sourceUrl) || undefined,
             product: {
               id: alt.productUrl || alt.description,
               name: alt.description || 'Packaging alternative',
@@ -1216,7 +1392,7 @@ function AlternativesTab({
               rating: 0,
               reviewCount: 0,
               availability: 'unknown',
-              url: alt.productUrl || '',
+              url: getVerifiedAlternativeUrl(alt.productUrl) || '',
               features: [],
               },
               reason: alt.description || '',
@@ -1228,8 +1404,13 @@ function AlternativesTab({
           }
         }
 
-        setWebAlternatives(prev => [...prev, ...alts])
+        researchCache.current.set(cacheKey, { alternatives: alts, sources: allSources })
+        setWebAlternatives(alts)
         setResearchSources(allSources)
+        setProductAnalysis({
+          ...(currentProductAnalysis || analysis),
+          alternatives: alts,
+        })
         console.log('TerraCart: Updated webAlternatives, total count:', alts.length)
         
         if (alts.length === 0) {
@@ -1248,21 +1429,25 @@ function AlternativesTab({
     }
   }
 
+  const handleSearchAllAlternatives = () => handleDeepResearch('all')
+  const handleReusableAlternatives = () => handleDeepResearch('reusable')
+  const handleLowerPackaging = () => handleDeepResearch('packaging')
+
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Research buttons */}
       <div className="terra-card p-4">
         <div className="terra-label mb-3">🔎 Web Research</div>
         <div className="space-y-2">
-          <button onClick={() => handleDeepResearch('all')} disabled={researchState === 'researching'} className="w-full text-left p-2 rounded-lg bg-terra-50 hover:bg-terra-100 transition-colors disabled:opacity-50">
+          <button onClick={handleSearchAllAlternatives} disabled={researchState === 'researching'} className="w-full text-left p-2 rounded-lg bg-terra-50 hover:bg-terra-100 transition-colors disabled:opacity-50">
             <div className="text-xs font-medium text-terra-700">Search for All Alternatives</div>
             <div className="text-[10px] text-gray-500">Find reusable, durable, lower-packaging, and budget options</div>
           </button>
-          <button onClick={() => handleDeepResearch('reusable')} disabled={researchState === 'researching'} className="w-full text-left p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 transition-colors disabled:opacity-50">
+          <button onClick={handleReusableAlternatives} disabled={researchState === 'researching'} className="w-full text-left p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 transition-colors disabled:opacity-50">
             <div className="text-xs font-medium text-emerald-700">Find Reusable Alternatives</div>
             <div className="text-[10px] text-gray-500">Replace disposable products with reusable ones</div>
           </button>
-          <button onClick={() => handleDeepResearch('packaging')} disabled={researchState === 'researching'} className="w-full text-left p-2 rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50">
+          <button onClick={handleLowerPackaging} disabled={researchState === 'researching'} className="w-full text-left p-2 rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors disabled:opacity-50">
             <div className="text-xs font-medium text-blue-700">Research Lower Packaging</div>
             <div className="text-[10px] text-gray-500">Find bulk, refill, or minimal-packaging versions</div>
           </button>
@@ -1272,7 +1457,9 @@ function AlternativesTab({
       {/* Research progress */}
       {researchState === 'researching' && (
         <div className="terra-card p-4">
-          <div className="terra-label mb-2">🔎 Research in Progress...</div>
+          <div className="terra-label mb-2">
+            {researchType === 'reusable' ? '♻️ Researching Reusable Alternatives...' : researchType === 'packaging' ? '📦 Researching Lower-Packaging Options...' : '🔎 Researching All Alternatives...'}
+          </div>
           <div className="space-y-1">
             {researchStatus.map((s, i) => (
               <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
@@ -1308,6 +1495,7 @@ function AlternativesTab({
               </div>
               {alt.product && <ProductCard product={alt.product} ecoScore={alt.scoreComparison.alternative} compact onClick={() => onSelectProduct(alt.product!)} />}
               <div className="mt-2 text-xs text-gray-500">{alt.reason}</div>
+              <AlternativeSource alternative={alt} />
               {alt.improvementAreas.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {alt.improvementAreas.map((area, i) => (
@@ -1315,15 +1503,7 @@ function AlternativesTab({
                   ))}
                 </div>
               )}
-              {alt.product?.url && alt.product.url.startsWith('http') ? (
-                <a href={alt.product.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-terra-600 hover:text-terra-700 font-medium">
-                  🏪 View at {alt.product.retailer} →
-                </a>
-              ) : (
-                <span className="mt-2 inline-block text-xs text-gray-400 italic">
-                  Product link unavailable
-                </span>
-              )}
+              <AlternativeRetailerLink alternative={alt} />
             </div>
           ))}
         </div>
@@ -1343,6 +1523,7 @@ function AlternativesTab({
               </div>
               {alt.product && <ProductCard product={alt.product} ecoScore={alt.scoreComparison.alternative} compact onClick={() => onSelectProduct(alt.product!)} />}
               <div className="mt-2 text-xs text-gray-500">{alt.reason}</div>
+              <AlternativeSource alternative={alt} />
               {alt.improvementAreas.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {alt.improvementAreas.map((area, i) => (
@@ -1350,15 +1531,7 @@ function AlternativesTab({
                   ))}
                 </div>
               )}
-              {alt.product?.url && alt.product.url.startsWith('http') ? (
-                <a href={alt.product.url} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-xs text-terra-600 hover:text-terra-700 font-medium">
-                  🏪 View at {alt.product.retailer} →
-                </a>
-              ) : (
-                <span className="mt-2 inline-block text-xs text-gray-400 italic">
-                  Product link unavailable
-                </span>
-              )}
+              <AlternativeRetailerLink alternative={alt} />
             </div>
           ))}
           {/* Sources */}
@@ -1679,6 +1852,55 @@ function HistoryPanel({ onBack, onAnalyze }: { onBack: () => void; onAnalyze: (p
 // ============================================================
 // Empty / Loading / Disabled States
 // ============================================================
+function ShoppingNoProductState({
+  retailer, pageType, onScan, showGeminiPrompt, onSetupGemini, isAnalyzing,
+}: {
+  retailer: string
+  pageType: string | null
+  onScan: () => void
+  showGeminiPrompt?: boolean
+  onSetupGemini?: () => void
+  isAnalyzing?: boolean
+}) {
+  const prettyPage =
+    pageType === 'product-page' ? 'Product Page' :
+    pageType === 'search-results' ? 'Search Results' :
+    pageType === 'category-page' ? 'Category' :
+    pageType === 'product' ? 'Product Page' :
+    pageType === 'search' ? 'Search Results' :
+    pageType ? pageType.charAt(0).toUpperCase() + pageType.slice(1) : 'Shopping Site'
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+      <div className="text-4xl mb-3 animate-pulse-soft">🛒</div>
+      <h2 className="text-base font-bold text-gray-800 mb-1">
+        {retailer ? '🌐 ' + retailer : 'Shopping Site Detected'}
+      </h2>
+      <p className="text-xs text-terra-600 font-medium mb-3">{prettyPage}</p>
+      <div className="terra-card border-terra-100 bg-terra-50/50 p-3 mb-4 text-left w-full max-w-xs">
+        <p className="text-xs text-gray-600 leading-relaxed">
+          TerraCart is checking this page for product information.
+          If you are on a specific product page and don't see anything,
+          click <strong>Rescan Page</strong>.
+        </p>
+      </div>
+      {!isAnalyzing && (
+        <div className="text-xs text-gray-500 mb-4 px-4 italic">
+          TerraCart couldn't reliably identify a product on this page yet.
+        </div>
+      )}
+      <button onClick={onScan} className="terra-btn-primary text-sm mb-3">
+        🔄 Rescan Page
+      </button>
+      {showGeminiPrompt && onSetupGemini && (
+        <button onClick={onSetupGemini} className="terra-btn-outline text-xs text-amber-600">
+          🤖 Set up AI Research (Gemini)
+        </button>
+      )}
+    </div>
+  )
+}
+
 function EmptyState({ onScan, showGeminiPrompt, onSetupGemini }: { onScan: () => void; showGeminiPrompt?: boolean; onSetupGemini?: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center">
@@ -1715,6 +1937,21 @@ function AnalyzingState() {
         <div className="flex items-center gap-2 justify-center text-gray-300">○ Evaluating reusable options</div>
         <div className="flex items-center gap-2 justify-center text-gray-300">○ Personalizing recommendation</div>
       </div>
+    </div>
+  )
+}
+
+function InactiveState() {
+  return (
+    <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+      <div className="text-4xl mb-4">⏸️</div>
+      <h2 className="text-lg font-bold text-gray-800 mb-2">TerraCart is inactive</h2>
+      <p className="text-sm text-gray-500 leading-relaxed mb-4">
+        This page isn’t currently recognized as a supported shopping view.
+      </p>
+      <p className="text-xs text-gray-400 mb-6">
+        Visit a product, search, or category page to activate TerraCart.
+      </p>
     </div>
   )
 }

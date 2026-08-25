@@ -1,3 +1,5 @@
+import { isHardBlockedHost, isKnownShoppingHost, looksLikeProductUrl } from './site-gate'
+
 // ============================================================
 // E-Commerce Detection Engine
 // Detects whether a webpage is an e-commerce/shopping site
@@ -29,32 +31,8 @@ export type ECommercePlatform =
 // Confidence threshold to consider a site as e-commerce
 const CONFIDENCE_THRESHOLD = 55
 
-// Blocklist: known non-e-commerce sites where the detector should never activate
-const NON_ECOMMERCE_BLOCKLIST = [
-  'google.com', 'gemini.google.com', 'chatgpt.com', 'openai.com',
-  'youtube.com', 'gmail.com', 'docs.google.com', 'drive.google.com',
-  'calendar.google.com', 'maps.google.com',
-  'github.com', 'gitlab.com', 'bitbucket.org',
-  'twitter.com', 'x.com', 'facebook.com', 'instagram.com',
-  'linkedin.com', 'reddit.com', 'tiktok.com', 'pinterest.com',
-  'slack.com', 'discord.com', 'teams.microsoft.com',
-  'notion.so', 'airtable.com', 'figma.com', 'canva.com',
-  'spotify.com', 'netflix.com', 'twitch.tv',
-  'wikipedia.org', 'medium.com', 'substack.com',
-  'stackoverflow.com', 'stackexchange.com',
-  'zoom.us', 'meet.google.com',
-  'chat.openai.com', 'claude.ai', 'perplexity.ai',
-  'dropbox.com', 'onedrive.live.com',
-  'trello.com', 'asana.com', 'jira.atlassian.com',
-]
-
 function isBlocklistedDomain(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname.replace('www.', '')
-    return NON_ECOMMERCE_BLOCKLIST.some(d => hostname === d || hostname.endsWith('.' + d))
-  } catch {
-    return false
-  }
+  return isHardBlockedHost(url)
 }
 
 /**
@@ -154,8 +132,16 @@ export function detectECommerce(doc: Document, url: string): ECommerceDetection 
   // ---- Detect category ----
   const category = detectPageCategory(doc, url)
 
+  const commerceSignals = jsonLdSignal.detected || ogSignal.detected || cartSignal.detected
+    || priceSignal.detected || productSignal.detected || gridSignal.detected || checkoutSignal.detected
+  // Platform alone (e.g. Shopify CDN on a blog) is not enough to activate TerraCart.
+  let isECommerce = confidence >= CONFIDENCE_THRESHOLD
+  if (shopifyStore && !commerceSignals && !isKnownShoppingHost(url)) {
+    isECommerce = false
+  }
+
   return {
-    isECommerce: confidence >= CONFIDENCE_THRESHOLD,
+    isECommerce,
     confidence,
     signals,
     platform,
@@ -163,6 +149,20 @@ export function detectECommerce(doc: Document, url: string): ECommerceDetection 
     retailerName,
     category,
   }
+}
+
+/** Product page vs shopping site (category/search/home). */
+export function isProductPage(doc: Document, url: string): boolean {
+  if (isHardBlockedHost(url)) return false
+  if (looksLikeProductUrl(url) && isKnownShoppingHost(url)) return true
+  const ogType = doc.querySelector('meta[property="og:type"]')?.getAttribute('content') || ''
+  if (ogType.toLowerCase().includes('product')) return true
+  const jsonLd = detectJsonLd(doc)
+  if (jsonLd.detected) return true
+  const cart = detectCartElements(doc)
+  const price = detectPriceElements(doc)
+  const structure = detectProductStructure(doc)
+  return cart.detected && price.detected && structure.detected
 }
 
 // ============================================================

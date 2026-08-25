@@ -2,15 +2,7 @@ import { scanPage, shouldActivate, detectECommerceSite, isKnownShoppingSite } fr
 import type { PageScanResult, Product } from '../types'
 import type { ECommerceDetection } from '../retailers/detector'
 
-// ============================================================
-// TerraCart Content Script
-// Automatically detects e-commerce websites and activates
-// the shopping copilot with product detection.
-// ============================================================
-
-// Guard against duplicate initialization (re-injection after extension reload)
 if ((window as any).__terracartInitialized) {
-  // Already running — just ensure the message listener responds to SCAN_PAGE
 } else {
   (window as any).__terracartInitialized = true
 
@@ -19,9 +11,9 @@ if ((window as any).__terracartInitialized) {
   let lastDetection: ECommerceDetection | null = null
   let isActive = false
   let scanDebounceTimer: ReturnType<typeof setTimeout> | null = null
-  const SCAN_DEBOUNCE_MS = 1000
+  let lastUrl = window.location.href
+  const SCAN_DEBOUNCE_MS = 800
 
-  // ---- Quick page type detection ----
   type QuickPageType = 'product' | 'search' | 'other'
 
   function detectPageType(): QuickPageType {
@@ -41,17 +33,15 @@ if ((window as any).__terracartInitialized) {
     return 'other'
   }
 
-  // ---- Initialize ----
   function init() {
     setupMessageListener()
+    setupHistoryWrappers()
+    setupDomObserver()
     runInitialDetection()
-    observePageChanges()
+    scheduleScanAtIntervals()
   }
 
-  // ---- Non-shopping site blocklist (comprehensive) ----
-  // TerraCart MUST NOT activate on any of these sites
   const NON_SHOPPING_BLOCKLIST = [
-    // Google services
     'google.com', 'gemini.google.com', 'aistudio.google.com',
     'gmail.com', 'docs.google.com', 'drive.google.com',
     'calendar.google.com', 'maps.google.com', 'meet.google.com',
@@ -60,52 +50,39 @@ if ((window as any).__terracartInitialized) {
     'classroom.google.com', 'forms.google.com', 'sheets.google.com',
     'slides.google.com', 'keep.google.com', 'groups.google.com',
     'cloud.google.com', 'console.cloud.google.com',
-    // AI assistants
     'chatgpt.com', 'chat.openai.com', 'openai.com',
     'claude.ai', 'anthropic.com', 'perplexity.ai',
     'copilot.microsoft.com', 'bing.com',
     'huggingface.co', 'replicate.com',
-    // Social media
     'facebook.com', 'instagram.com', 'twitter.com', 'x.com',
     'linkedin.com', 'reddit.com', 'tiktok.com', 'snapchat.com',
     'pinterest.com', 'threads.net', 'mastodon.social',
     'bsky.app', 'truthsocial.com',
-    // Video/Streaming
     'youtube.com', 'netflix.com', 'twitch.tv', 'hulu.com',
     'disneyplus.com', 'hbomax.com', 'primevideo.com',
-    'vimeo.com', 'dailymotion.com', 'twitch.tv',
-    // Music
+    'vimeo.com', 'dailymotion.com',
     'spotify.com', 'music.apple.com', 'soundcloud.com',
     'deezer.com', 'tidal.com', 'pandora.com',
-    // Productivity/Work
     'notion.so', 'airtable.com', 'figma.com', 'canva.com',
     'slack.com', 'discord.com', 'teams.microsoft.com',
     'trello.com', 'asana.com', 'monday.com', 'clickup.com',
     'linear.app', 'jira.atlassian.com', 'confluence.atlassian.com',
     'miro.com', 'lucidchart.com',
-    // Cloud/Dev
     'github.com', 'gitlab.com', 'bitbucket.org',
     'stackoverflow.com', 'stackexchange.com',
     'vercel.com', 'netlify.com', 'heroku.com',
     'aws.amazon.com', 'cloud.google.com', 'portal.azure.com',
     'digitalocean.com', 'linode.com', 'vultr.com',
-    // File storage
     'dropbox.com', 'onedrive.live.com', 'drive.google.com',
     'icloud.com', 'box.com', 'mega.nz',
-    // News/Blogs
     'medium.com', 'substack.com', 'wordpress.com',
     'blogger.com', 'ghost.io',
-    // Communication
     'zoom.us', 'webex.com', 'goto.com',
     'mailchimp.com', 'sendgrid.com',
-    // Education
     'coursera.org', 'udemy.com', 'edx.org',
     'khanacademy.org', 'skillshare.com',
-    // Reference
     'wikipedia.org', 'britannica.com',
-    // Government/Info
     'gov', '.mil', '.edu',
-    // Other non-shopping
     'archive.org', 'imdb.com', 'rottentomatoes.com',
     'metacritic.com', 'goodreads.com', 'tripadvisor.com',
     'yelp.com', 'zomato.com', 'opentable.com',
@@ -113,61 +90,137 @@ if ((window as any).__terracartInitialized) {
     'uber.com', 'lyft.com',
   ]
 
-  // ---- Check if URL is on the blocklist ----
   function isBlocklistedUrl(url: string): boolean {
     try {
       const hostname = new URL(url).hostname.replace('www.', '')
       return NON_SHOPPING_BLOCKLIST.some(d => {
-        // Exact match or subdomain match
         if (hostname === d) return true
         if (hostname.endsWith('.' + d)) return true
-        // Special handling for Google domains
         if (d === 'google.com' && hostname.endsWith('.google.com')) return true
         return false
       })
     } catch {
       return false
     }
-  }  // ---- Initial Detection ----
+  }
+
+  function setupHistoryWrappers() {
+    const originalPushState = history.pushState
+    const originalReplaceState = history.replaceState
+
+    history.pushState = function (...args: Parameters<typeof history.pushState>) {
+      const result = originalPushState.apply(this, args)
+      setTimeout(() => handleUrlChange('pushState'), 50)
+      return result
+    }
+
+    history.replaceState = function (...args: Parameters<typeof history.replaceState>) {
+      const result = originalReplaceState.apply(this, args)
+      setTimeout(() => handleUrlChange('replaceState'), 50)
+      return result
+    }
+
+    window.addEventListener('popstate', () => {
+      setTimeout(() => handleUrlChange('popstate'), 50)
+    })
+  }
+
+  function handleUrlChange(reason: string) {
+    const newUrl = window.location.href
+    if (newUrl === lastUrl) return
+    lastUrl = newUrl
+    lastScanResult = null
+    isActive = false
+
+    console.log('TerraCart: URL changed via', reason, '→', newUrl)
+
+    if (isBlocklistedUrl(newUrl)) {
+      deactivateTerraCart('blocklisted:' + reason)
+      return
+    }
+
+    const detection = detectECommerceSite(document, newUrl)
+    lastDetection = detection
+
+    if (isKnownShoppingSite(newUrl) || (detection.isECommerce && detection.confidence >= 60)) {
+      activateTerraCart('spa-navigation:' + reason, detection)
+    } else {
+      deactivateTerraCart('not-ecommerce:' + reason)
+    }
+
+    scheduleScanDelayed(300)
+    scheduleScanDelayed(1000)
+    scheduleScanDelayed(2500)
+  }
+
+  function setupDomObserver() {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+    const observer = new MutationObserver(() => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        const priceCount = document.querySelectorAll('[class*="price"], [class*="Price"], [data-price], [itemprop="price"]').length
+        const productCount = document.querySelectorAll('[class*="product"], [data-product-id], [data-asin]').length
+        const jsonLd = document.querySelector('script[type="application/ld+json"]')
+        if (priceCount > 0 || productCount > 3 || jsonLd) {
+          if (!lastScanResult ||
+              (lastScanResult.type === 'other') ||
+              (!lastScanResult.primaryProduct && lastScanResult.products.length === 0)) {
+            scheduleScan()
+          }
+        }
+      }, 1200)
+    })
+
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true })
+    } else {
+      document.addEventListener('DOMContentLoaded', () => {
+        if (document.body) observer.observe(document.body, { childList: true, subtree: true })
+      })
+    }
+
+    window.addEventListener('beforeunload', () => {
+      observer.disconnect()
+    })
+  }
+
+  function scheduleScanAtIntervals() {
+    setTimeout(() => performScan(), 50)
+    setTimeout(() => performScan(), 300)
+    setTimeout(() => performScan(), 800)
+    setTimeout(() => performScan(), 1500)
+    setTimeout(() => performScan(), 2500)
+  }
+
   function runInitialDetection() {
     const url = window.location.href
     console.log('TerraCart: runInitialDetection called for', url)
 
-    // CRITICAL: Check blocklist FIRST - before any other detection
     if (isBlocklistedUrl(url)) {
-      console.log('TerraCart: URL is blocklisted, staying inactive')
-      // Do nothing - TerraCart stays completely inactive
+      console.log('TerraCart: URL is blocklisted')
+      deactivateTerraCart('blocklisted')
       return
     }
 
-    // Fast path: known shopping domain
     if (isKnownShoppingSite(url)) {
       console.log('TerraCart: Known shopping site detected')
       activateTerraCart('known-domain')
-      // Delay scan to let SPA frameworks render product elements
-      scheduleScanDelayed(2000)
       return
     }
 
-
-    // Full e-commerce detection — wait for DOM to settle
     setTimeout(() => {
-      // Re-check blocklist after delay (in case of SPA navigation)
-      if (isBlocklistedUrl(window.location.href)) {
-        return
-      }
-      
+      if (isBlocklistedUrl(window.location.href)) return
       const detection = detectECommerceSite(document, url)
       lastDetection = detection
       console.log('TerraCart: E-commerce detection result:', detection)
       if (detection.isECommerce && detection.confidence >= 60) {
         activateTerraCart('detected', detection)
-        scheduleScanDelayed(2000)
+      } else {
+        deactivateTerraCart('not-ecommerce')
       }
-    }, 1200)
+    }, 600)
   }
 
-  // ---- Activation ----
   function activateTerraCart(reason: string, detection?: ECommerceDetection) {
     if (isActive) return
     isActive = true
@@ -184,6 +237,7 @@ if ((window as any).__terracartInitialized) {
         pageType: detectPageType(),
         detection: detection ? {
           confidence: detection.confidence,
+          isECommerce: detection.isECommerce,
           platform: detection.platform,
           shopifyStore: detection.shopifyStore,
           retailerName: detection.retailerName,
@@ -193,23 +247,51 @@ if ((window as any).__terracartInitialized) {
     }).catch(() => {})
   }
 
-  // ---- Scan scheduling ----
+  function deactivateTerraCart(reason: string) {
+    if (scanDebounceTimer) {
+      clearTimeout(scanDebounceTimer)
+      scanDebounceTimer = null
+    }
+    lastScanResult = null
+    lastDetection = null
+    isActive = false
+    if (floatingButton) {
+      floatingButton.remove()
+      floatingButton = null
+      tooltipEl = null
+    }
+    chrome.runtime?.sendMessage({
+      type: 'TERRACART_DEACTIVATED',
+      data: { url: window.location.href, reason },
+    }).catch(() => {})
+  }
+
   function scheduleScan() {
     if (scanDebounceTimer) clearTimeout(scanDebounceTimer)
     scanDebounceTimer = setTimeout(() => { performScan() }, SCAN_DEBOUNCE_MS)
   }
 
   function scheduleScanDelayed(ms: number) {
-    if (scanDebounceTimer) clearTimeout(scanDebounceTimer)
-    scanDebounceTimer = setTimeout(() => { performScan() }, ms)
+    setTimeout(() => { performScan() }, ms)
   }
 
-  // ---- Page Scanning ----
   function performScan(): PageScanResult {
     try {
+      if (isBlocklistedUrl(window.location.href)) {
+        return {
+          type: 'other', products: [], retailer: window.location.hostname,
+          pageTitle: document.title, timestamp: Date.now(),
+        }
+      }
+
       console.log('TerraCart: performScan called')
       const result = scanPage(document, window.location.href)
-      console.log('TerraCart: Scan result:', result)
+      console.log('TerraCart: Scan result:', {
+        type: result.type,
+        products: result.products.length,
+        primaryProduct: result.primaryProduct?.name,
+        retailer: result.retailer,
+      })
       lastScanResult = result
 
       const hasProduct = result.type === 'product-page' && result.primaryProduct
@@ -217,17 +299,17 @@ if ((window as any).__terracartInitialized) {
 
       chrome.runtime?.sendMessage({
         type: 'SET_BADGE',
-        text: hasProduct ? '●' : productCount > 0 ? String(productCount) : '',
+        text: hasProduct ? '●' : productCount > 0 ? String(Math.min(productCount, 99)) : '',
         color: hasProduct ? '#16a34a' : productCount > 0 ? '#3b82f6' : '',
       }).catch(() => {})
 
-      // Send scan results to background (which forwards to side panel)
       chrome.runtime?.sendMessage({
         type: 'PAGE_SCANNED',
         data: {
           type: result.type,
           productCount: result.products.length,
           primaryProduct: result.primaryProduct || null,
+          products: result.products,
           retailer: result.retailer,
           url: window.location.href,
           pageTitle: result.pageTitle,
@@ -239,6 +321,7 @@ if ((window as any).__terracartInitialized) {
             retailerName: lastDetection.retailerName,
             category: lastDetection.category,
           } : null,
+          timestamp: Date.now(),
         },
       }).catch(() => {})
 
@@ -257,46 +340,21 @@ if ((window as any).__terracartInitialized) {
     }
   }
 
-  // ---- SPA Navigation Detection ----
   function observePageChanges() {
-    let lastUrl = window.location.href
-
     const urlCheckInterval = setInterval(() => {
       if (window.location.href !== lastUrl) {
         lastUrl = window.location.href
-        isActive = false
-        const detection = detectECommerceSite(document, window.location.href)
-        lastDetection = detection
-        if (detection.isECommerce && !isActive) {
-          activateTerraCart('spa-navigation', detection)
-        }
-        scheduleScanDelayed(2000)
+        handleUrlChange('interval-detect')
       }
-    }, 1500)
-
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
-    const observer = new MutationObserver(() => {
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        const priceElements = document.querySelectorAll('[class*="price"], [class*="Price"], [data-price], [itemprop="price"]')
-        const productElements = document.querySelectorAll('[class*="product"], [data-product-id]')
-        if (priceElements.length > 0 || productElements.length > 3) {
-          scheduleScan()
-        }
-      }, 2000)
-    })
-
-    if (document.body) {
-      observer.observe(document.body, { childList: true, subtree: false })
-    }
+    }, 1000)
 
     window.addEventListener('beforeunload', () => {
       clearInterval(urlCheckInterval)
-      observer.disconnect()
     })
   }
 
-  // ---- Floating Button ----
+  observePageChanges()
+
   let tooltipEl: HTMLDivElement | null = null
 
   function injectFloatingButton() {
@@ -331,7 +389,7 @@ if ((window as any).__terracartInitialized) {
       background: 'linear-gradient(135deg, #16a34a, #15803d)',
       border: '3px solid white', boxShadow: '0 4px 14px rgba(22, 163, 74, 0.4)',
       cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      transition: 'transform 0.2s, box-shadow 0.2s',
+      transition: 'transform 0.2s, boxShadow 0.2s',
     })
     const btnImg = document.createElement('img')
     btnImg.src = chrome.runtime.getURL('icons/icon48.png')
@@ -395,11 +453,10 @@ if ((window as any).__terracartInitialized) {
 
   function openSidePanel() {
     chrome.runtime?.sendMessage({ type: 'OPEN_SIDE_PANEL' }).catch(() => {
-      try { (chrome.sidePanel as any)?.open({ windowId: (chrome.windows as any).WINDOW_ID_CURRENT }) } catch { /* ignore */ }
+      try { (chrome.sidePanel as any)?.open({ windowId: (chrome.windows as any).WINDOW_ID_CURRENT }) } catch { }
     })
   }
 
-  // ---- Message Listener ----
   function setupMessageListener() {
     chrome.runtime?.onMessage.addListener((message, _sender, sendResponse) => {
       switch (message.type) {
@@ -408,16 +465,50 @@ if ((window as any).__terracartInitialized) {
           sendResponse(result)
           return true
         }
-        case 'GET_CACHED_SCAN': { sendResponse(lastScanResult); return false }
+        case 'GET_CACHED_SCAN': {
+          if (!lastScanResult) {
+            const r = performScan()
+            sendResponse(r)
+          } else {
+            sendResponse(lastScanResult)
+          }
+          return true
+        }
         case 'GET_ECOMMERCE_DETECTION': {
           if (!lastDetection) lastDetection = detectECommerceSite(document, window.location.href)
-          sendResponse(lastDetection); return false
+          sendResponse(lastDetection)
+          return false
         }
         case 'GET_PRODUCT_INFO': {
           if (lastScanResult?.primaryProduct) sendResponse(lastScanResult.primaryProduct)
           else if (lastScanResult?.products.length) sendResponse(lastScanResult.products[0])
-          else sendResponse(null)
-          return false
+          else {
+            const r = performScan()
+            sendResponse(r.primaryProduct || null)
+          }
+          return true
+        }
+        case 'REQUEST_INITIAL_STATE': {
+          if (!lastScanResult) {
+            const r = performScan()
+            sendResponse({
+              scanResult: r,
+              detection: lastDetection,
+              pageType: detectPageType(),
+              isKnownShopping: isKnownShoppingSite(window.location.href),
+              url: window.location.href,
+            })
+          } else {
+            sendResponse({
+              scanResult: lastScanResult,
+              detection: lastDetection,
+              isECommerce: !!lastDetection?.isECommerce || isKnownShoppingSite(window.location.href),
+              pageType: detectPageType(),
+              isKnownShopping: isKnownShoppingSite(window.location.href),
+              url: window.location.href,
+            })
+          }
+          return true
         }
         case 'ACTIVATE_TERRACART': { activateTerraCart('manual'); sendResponse({ success: true }); return false }
         case 'HIDE_FLOATING_BUTTON': { removeFloatingButton(); sendResponse({ success: true }); return false }
@@ -429,7 +520,6 @@ if ((window as any).__terracartInitialized) {
     })
   }
 
-  // ---- Auto-Open Toast ----
   let autoOpenToast: HTMLDivElement | null = null
   let autoOpenTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -470,7 +560,6 @@ if ((window as any).__terracartInitialized) {
     if (autoOpenToast) { autoOpenToast.remove(); autoOpenToast = null }
   }
 
-  // ---- Sound ----
   function playAutoOpenSound(volume: 'off' | 'soft' | 'loud' = 'soft') {
     if (volume === 'off') return
     try {
@@ -488,9 +577,8 @@ if ((window as any).__terracartInitialized) {
         osc.connect(gain); gain.connect(ctx.destination)
         osc.start(now + i * 0.12); osc.stop(now + i * 0.12 + 0.3)
       })
-    } catch { /* Web Audio not available */ }
+    } catch { }
   }
 
-  // ---- Start ----
   init()
 }
