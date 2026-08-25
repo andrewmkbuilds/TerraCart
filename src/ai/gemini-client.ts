@@ -56,32 +56,59 @@ export async function callGemini(
   }
 
   const url = `${GEMINI_API_BASE}/models/${MODEL}:generateContent?key=${apiKey}`
+  const maxAttempts = 4
+  let retryDelayMs = 1000
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  })
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      })
 
-  if (!response.ok) {
-    const errorBody = await response.text()
-    if (response.status === 400) throw new Error('GEMINI_BAD_REQUEST: ' + errorBody)
-    if (response.status === 403) throw new Error('GEMINI_API_KEY_INVALID')
-    if (response.status === 429) throw new Error('GEMINI_RATE_LIMITED')
-    throw new Error('GEMINI_ERROR_' + response.status + ': ' + errorBody)
+      if (!response.ok) {
+        const errorBody = await response.text()
+        if (response.status === 400) throw new Error('GEMINI_BAD_REQUEST: ' + errorBody)
+        if (response.status === 403) throw new Error('GEMINI_API_KEY_INVALID')
+        if (response.status === 429) {
+          if (attempt < maxAttempts) {
+            const retryAfterHeader = response.headers.get('Retry-After')
+            const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : retryDelayMs
+            const delayMs = Number.isFinite(retryAfterMs) && retryAfterMs > 0 ? retryAfterMs : retryDelayMs
+            await new Promise(resolve => setTimeout(resolve, delayMs))
+            retryDelayMs *= 2
+            continue
+          }
+          throw new Error('GEMINI_RATE_LIMITED')
+        }
+        throw new Error('GEMINI_ERROR_' + response.status + ': ' + errorBody)
+      }
+
+      const data: GeminiResponse = await response.json()
+
+      if (data.promptFeedback?.blockReason) {
+        throw new Error('GEMINI_BLOCKED: ' + data.promptFeedback.blockReason)
+      }
+
+      if (!data.candidates || data.candidates.length === 0) {
+        throw new Error('GEMINI_NO_CANDIDATES')
+      }
+
+      return data
+    } catch (err) {
+      if (attempt >= maxAttempts) throw err
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('GEMINI_RATE_LIMITED')) {
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs))
+        retryDelayMs *= 2
+        continue
+      }
+      throw err
+    }
   }
 
-  const data: GeminiResponse = await response.json()
-
-  if (data.promptFeedback?.blockReason) {
-    throw new Error('GEMINI_BLOCKED: ' + data.promptFeedback.blockReason)
-  }
-
-  if (!data.candidates || data.candidates.length === 0) {
-    throw new Error('GEMINI_NO_CANDIDATES')
-  }
-
-  return data
+  throw new Error('GEMINI_RATE_LIMITED')
 }
 
 // ============================================================

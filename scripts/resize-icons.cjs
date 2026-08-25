@@ -5,7 +5,7 @@ const fs = require('fs');
 const inputPath = path.join(__dirname, '../icons/logo-original.jpg');
 const outputDir = path.join(__dirname, '../icons');
 
-const sizes = [16, 48, 128];
+const sizes = [16, 48, 128, 256];
 
 async function resizeIcons() {
   try {
