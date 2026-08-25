@@ -99,8 +99,9 @@ export async function researchAlternativesWithGemini(
 
     console.log('TerraCart: Parsed JSON successfully')
     const parsed = JSON.parse(jsonStr) as GeminiResearchResult
-    console.log('TerraCart: Parsed alternatives:', parsed.alternatives?.length || 0)
-    return { research: parsed, sources, searchQueries }
+    const research = sanitizeResearchResult(parsed, sources)
+    console.log('TerraCart: Parsed alternatives:', research.alternatives?.length || 0)
+    return { research, sources, searchQueries }
   } catch (err: any) {
     console.error('TerraCart: researchAlternativesWithGemini error:', err)
     const msg = err?.message || String(err)
@@ -114,6 +115,33 @@ export async function researchAlternativesWithGemini(
       return { research: null, sources: [], searchQueries: [], error: 'Rate limited. Please wait and try again.' }
     }
     return { research: null, sources: [], searchQueries: [], error: 'Research failed: ' + msg.slice(0, 200) }
+  }
+}
+
+function sanitizeResearchResult(
+  result: GeminiResearchResult,
+  sources: Array<{ name: string; url: string }>,
+): GeminiResearchResult {
+  const groundedUrls = new Set(sources.map(source => source.url))
+  const sanitizeUrl = (value: unknown): string | null => {
+    if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) return null
+    try {
+      const parsed = new URL(value)
+      return groundedUrls.has(value) || groundedUrls.has(parsed.href) ? parsed.href : null
+    } catch {
+      return null
+    }
+  }
+  const sanitizeItem = <T extends { productUrl?: string | null; url?: string; sourceUrl?: string }>(item: T) => {
+    const productUrl = sanitizeUrl(item.productUrl || item.url)
+    return { ...item, productUrl, sourceUrl: sanitizeUrl(item.sourceUrl) || productUrl, url: undefined }
+  }
+
+  return {
+    ...result,
+    alternatives: (result.alternatives || []).map(sanitizeItem),
+    reusableAlternatives: (result.reusableAlternatives || []).map(sanitizeItem),
+    packagingAlternatives: (result.packagingAlternatives || []).map(sanitizeItem),
   }
 }
 

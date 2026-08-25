@@ -7,7 +7,9 @@
     "activeTab",
     "storage",
     "sidePanel",
-    "scripting"
+    "scripting",
+    "webNavigation",
+    "tabs"
   ],
   "host_permissions": [
     "http://*/*",
@@ -18,7 +20,8 @@
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "128": "icons/icon128.png",
+      "256": "icons/icon256.png"
     }
   },
   "side_panel": {
@@ -31,6 +34,32 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "exclude_matches": [
+        "*://google.com/*",
+        "*://*.google.com/*",
+        "*://chatgpt.com/*",
+        "*://*.chatgpt.com/*",
+        "*://chat.openai.com/*",
+        "*://*.openai.com/*",
+        "*://claude.ai/*",
+        "*://*.claude.ai/*",
+        "*://youtube.com/*",
+        "*://*.youtube.com/*",
+        "*://github.com/*",
+        "*://*.github.com/*",
+        "*://reddit.com/*",
+        "*://*.reddit.com/*",
+        "*://wikipedia.org/*",
+        "*://*.wikipedia.org/*",
+        "*://instagram.com/*",
+        "*://*.instagram.com/*",
+        "*://facebook.com/*",
+        "*://*.facebook.com/*",
+        "*://x.com/*",
+        "*://*.x.com/*",
+        "*://*.linkedin.com/*",
+        "*://*.news.google.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
@@ -39,7 +68,8 @@
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
+    "128": "icons/icon128.png",
+    "256": "icons/icon256.png"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"

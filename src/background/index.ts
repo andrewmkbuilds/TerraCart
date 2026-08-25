@@ -6,6 +6,7 @@
 // ============================================================
 
 import { analyzeProductWithGemini, researchAlternativesWithGemini, chatWithGemini } from '../ai/gemini-service'
+import { isApiKeyConfigured, saveApiKey, getApiKey } from '../ai/gemini-client'
 import type { Product, UserPreferences } from '../types'
 
 const STORAGE_KEYS = {
@@ -50,6 +51,28 @@ const tabScanData = new Map<number, unknown>()
 const tabDetectionData = new Map<number, unknown>()
 const pendingAutoOpenTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
+function clearTabActivation(tabId: number) {
+  tabScanData.delete(tabId)
+  tabDetectionData.delete(tabId)
+  const timer = pendingAutoOpenTimers.get(tabId)
+  if (timer) {
+    clearTimeout(timer)
+    pendingAutoOpenTimers.delete(tabId)
+  }
+  chrome.action.setBadgeText({ text: '', tabId }).catch(() => {})
+  chrome.sidePanel?.setOptions({ tabId, enabled: false }).catch(() => {})
+  // Notify side panel if open (best-effort, no listener required)
+  chrome.runtime.sendMessage({ type: 'TAB_DEACTIVATED', tabId }).catch(() => {})
+}
+
+function isShoppingTab(tab: chrome.tabs.Tab): boolean {
+  if (!tab.id || !tab.url || isBlocklistedUrl(tab.url)) return false
+  if (isKnownDomain(tab.url)) return true
+  const detection = tabDetectionData.get(tab.id) as { isECommerce?: boolean; confidence?: number } | undefined
+  const scan = tabScanData.get(tab.id) as { primaryProduct?: unknown; productCount?: number } | undefined
+  return !!(detection?.isECommerce && (detection.confidence || 0) >= 55) || !!scan?.primaryProduct || !!scan?.productCount
+}
+
 // ---- Side Panel Setup ----
 if (chrome.sidePanel) {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {})
@@ -58,8 +81,9 @@ if (chrome.sidePanel) {
 
 // ---- Click on extension icon: open side panel ----
 chrome.action.onClicked.addListener(async (tab) => {
-  if (tab.id) {
+  if (tab.id && isShoppingTab(tab)) {
     try {
+      await chrome.sidePanel.setOptions({ tabId: tab.id, enabled: true })
       await chrome.sidePanel.open({ windowId: tab.windowId })
     } catch {
       chrome.tabs.sendMessage(tab.id, { type: 'OPEN_SIDE_PANEL' }).catch(() => {})
@@ -95,11 +119,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         
         // CRITICAL: Check blocklist BEFORE any auto-open logic
         if (isBlocklistedUrl(tabUrl)) {
+          clearTabActivation(sender.tab.id)
           sendResponse({ success: false, error: 'Non-shopping site' })
           return false
         }
         
         if (message.data) tabDetectionData.set(sender.tab.id, message.data)
+        const detection = message.data?.detection
+        if (!isKnownDomain(tabUrl) && !(detection?.isECommerce && (detection.confidence || 0) >= 55)) {
+          clearTabActivation(sender.tab.id)
+          sendResponse({ success: false, error: 'Not an e-commerce site' })
+          return false
+        }
+        chrome.sidePanel?.setOptions({ tabId: sender.tab.id, enabled: true }).catch(() => {})
         updateBadgeForTab(sender.tab.id, 'active')
 
         const pageType = message.data?.pageType as string | undefined
@@ -152,6 +184,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           pendingAutoOpenTimers.delete(tabIdCancel)
         }
       }
+      sendResponse({ success: true })
+      return false
+    }
+
+    case 'TERRACART_DEACTIVATED': {
+      if (sender.tab?.id) clearTabActivation(sender.tab.id)
       sendResponse({ success: true })
       return false
     }
@@ -330,15 +368,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false
     }
 
+    case 'OPEN_EXTERNAL_URL': {
+      const targetUrl = typeof message.url === 'string' ? message.url : ''
+      try {
+        const parsedUrl = new URL(targetUrl)
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Invalid URL protocol')
+        chrome.tabs.create({ url: parsedUrl.href }).then(tab => sendResponse({ success: true, tabId: tab.id }))
+          .catch((err: unknown) => sendResponse({ success: false, error: String(err) }))
+      } catch {
+        sendResponse({ success: false, error: 'Invalid product URL' })
+        return false
+      }
+      return true
+    }
+
     // ---- Gemini AI ----
     case 'GET_API_KEY': {
-      sendResponse({ configured: true, hasKey: true })
-      return false
+      isApiKeyConfigured().then(configured => {
+        getApiKey().then(key => {
+          sendResponse({ configured, hasKey: !!key })
+        })
+      })
+      return true
     }
 
     case 'SET_API_KEY': {
-      sendResponse({ success: true })
-      return false
+      if (message.key) {
+        saveApiKey(String(message.key)).then(() => sendResponse({ success: true }))
+      } else {
+        sendResponse({ success: false, error: 'No key provided' })
+      }
+      return true
     }
 
     case 'GEMINI_ANALYZE': {
@@ -360,11 +420,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const rType = message.researchType as 'alternatives' | 'reusable' | 'packaging' | 'all'
       if (!rProduct) { sendResponse({ error: 'No product provided' }); return false }
       researchAlternativesWithGemini(rProduct, rPrefs, rType || 'all').then(result => {
-        console.log('TerraCart: GEMINI_RESEARCH result', { alternatives: result.research?.alternatives?.length || 0, error: result.error })
-        sendResponse(result)
+        const alternatives = [
+          ...(result.research?.alternatives || []),
+          ...(result.research?.reusableAlternatives || []),
+          ...(result.research?.packagingAlternatives || []),
+        ]
+        const response = {
+          ...result,
+          success: !result.error && !!result.research,
+          alternatives,
+          researchSummary: result.research?.summary || (result.error ? undefined : 'No verified alternatives found.'),
+          error: result.error || (!result.research ? 'Research returned no response' : undefined),
+        }
+        console.log('TerraCart: GEMINI_RESEARCH result', { success: response.success, alternatives: alternatives.length, error: response.error })
+        sendResponse(response)
       }).catch((err: unknown) => {
         console.error('TerraCart: GEMINI_RESEARCH error', err)
-        sendResponse({ research: null, sources: [], searchQueries: [], error: String(err) })
+        sendResponse({ success: false, research: null, alternatives: [], sources: [], searchQueries: [], error: 'Research request failed: ' + String(err) })
       })
       return true
     }
@@ -392,14 +464,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     if (tab.url) {
       const enabled = await isWebsiteEnabled(tab.url)
       if (enabled) {
-        const detection = tabDetectionData.get(activeInfo.tabId)
         const scanData = tabScanData.get(activeInfo.tabId) as any
         if (scanData?.primaryProduct) {
           updateBadgeForTab(activeInfo.tabId, 'product')
-        } else if (detection && (detection as any).confidence > 50) {
-          updateBadgeForTab(activeInfo.tabId, 'active')
-        } else if (isKnownDomain(tab.url)) {
-          updateBadgeForTab(activeInfo.tabId, 'active')
         } else {
           updateBadgeForTab(activeInfo.tabId, 'active')
         }
@@ -413,28 +480,63 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
-    tabScanData.delete(tabId)
-    tabDetectionData.delete(tabId)
-    isWebsiteEnabled(tab.url).then(enabled => {
-      if (enabled) {
-        if (isKnownDomain(tab.url!)) {
-          updateBadgeForTab(tabId, 'active')
-        } else {
-          chrome.action.setBadgeText({ text: '', tabId })
-        }
-      } else {
-        chrome.action.setBadgeText({ text: 'OFF', tabId })
-        chrome.action.setBadgeBackgroundColor({ color: '#9ca3af', tabId })
-      }
-    })
+    if (isBlocklistedUrl(tab.url)) {
+      // Blocklisted: fully deactivate
+      clearTabActivation(tabId)
+    } else if (isKnownDomain(tab.url)) {
+      // Known shopping domain: ensure side panel is available
+      chrome.sidePanel?.setOptions({ tabId, enabled: true }).catch(() => {})
+      updateBadgeForTab(tabId, 'active')
+    }
+    // For detected (non-known) shops, let the content script handle re-activation.
+    // For non-shopping tabs, do nothing — the content script handles its own state.
+  } else if (changeInfo.title || changeInfo.url) {
+    // SPA navigation: title or url changed - trigger re-scan via the content script
+    if (tab?.url && isBlocklistedUrl(tab.url)) {
+      clearTabActivation(tabId)
+    } else if (tab?.url && (isKnownDomain(tab.url) || tabDetectionData.has(tabId))) {
+      // Re-scan known domains AND detected e-commerce shops (not just known)
+      setTimeout(() => {
+        try {
+          chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, () => {
+            void chrome.runtime.lastError
+          })
+        } catch { /* no-op */ }
+      }, 200)
+    }
+    // Note: non-shopping, non-blocklisted tabs are left alone —
+    // the content script handles its own deactivation.
   }
 })
 
+// ---- Backup SPA navigation listener (webNavigation) ----
+if (chrome.webNavigation?.onHistoryStateUpdated) {
+  chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
+    if (!details.url || details.frameId !== 0) return
+      if (isBlocklistedUrl(details.url)) { clearTabActivation(details.tabId); return }
+    if (isKnownDomain(details.url)) {
+      console.log('TerraCart: SPA navigation detected (webNavigation):', details.url)
+      setTimeout(() => {
+        try {
+          chrome.tabs.sendMessage(details.tabId, { type: 'SCAN_PAGE' }, () => { void chrome.runtime.lastError })
+        } catch { /* no-op */ }
+      }, 150)
+    }
+  }, { url: [{ schemes: ['http', 'https'] }] })
+}
+if (chrome.webNavigation?.onReferenceFragmentUpdated) {
+  chrome.webNavigation.onReferenceFragmentUpdated.addListener((details) => {
+    if (details.frameId !== 0 || !details.url || isBlocklistedUrl(details.url)) return
+    if (isKnownDomain(details.url)) {
+      try {
+        chrome.tabs.sendMessage(details.tabId, { type: 'SCAN_PAGE' }, () => { void chrome.runtime.lastError })
+      } catch { /* no-op */ }
+    }
+  }, { url: [{ schemes: ['http', 'https'] }] })
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
-  tabScanData.delete(tabId)
-  tabDetectionData.delete(tabId)
-  const timer = pendingAutoOpenTimers.get(tabId)
-  if (timer) { clearTimeout(timer); pendingAutoOpenTimers.delete(tabId) }
+  clearTabActivation(tabId)
 })
 
 // ---- Badge Management ----

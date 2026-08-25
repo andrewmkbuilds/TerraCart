@@ -46,7 +46,8 @@ Your task is to research real alternatives to the product described. For each al
 - Brand
 - Retailer/website
 - Price (if found in search results)
-- Product URL (the actual page URL)
+- Product URL (the actual retailer product page URL from a grounded search result)
+- Source URL (the grounded page where the product was found; keep this separate)
 - Why it might be better
 - Eco-relevant characteristics
 
@@ -144,7 +145,7 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
   "confidence": "high" | "medium" | "low",
   "reasoning": ["<reason 1>", "<reason 2>", ...],
   "packagingAnalysis": "<brief packaging assessment>",
-  "greenwarningWarning": null or "<warning if claims seem unsubstantiated>",
+  "greenwashingWarning": null or "<warning if claims seem unsubstantiated>",
   "researchSources": [{"name": "<source name>", "url": "<url if available>", "type": "manufacturer"|"retailer"|"independent"|"ai-inference"}]
 }
 
@@ -193,7 +194,8 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
       "brand": "<brand name>",
       "retailer": "<where it's sold>",
       "price": "<price if found, otherwise 'Price unavailable'>",
-      "url": "<actual product page URL>",
+      "productUrl": "<actual retailer product page URL from search results, or null>",
+      "sourceUrl": "<grounded source URL>",
       "reason": "<why this might be better>",
       "ecoScore": <number 0-10 or null if uncertain>,
       "characteristics": ["<key feature 1>", "<key feature 2>"]
@@ -202,7 +204,8 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
   "packagingAlternatives": [
     {
       "description": "<description of packaging alternative>",
-      "url": "<URL if found>",
+      "productUrl": "<actual retailer product page URL from search results, or null>",
+      "sourceUrl": "<grounded source URL>",
       "retailer": "<retailer name>"
     }
   ],
@@ -212,7 +215,8 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
       "brand": "<brand>",
       "retailer": "<retailer>",
       "price": "<price>",
-      "url": "<URL>",
+      "productUrl": "<actual retailer product page URL from search results, or null>",
+      "sourceUrl": "<grounded source URL>",
       "reason": "<why reusable alternative>"
     }
   ],
@@ -221,7 +225,7 @@ Respond with a JSON object ONLY (no markdown, no code blocks) with this structur
   "sources": [{"name": "<source name>", "url": "<source URL>", "type": "manufacturer"|"retailer"|"independent"}]
 }
 
-Only include alternatives you found through search. If no alternatives were found for a category, return an empty array. Never fabricate products.`
+Only include alternatives you found through search. If the actual retailer product page URL is not present in the grounded search results, set productUrl to null and do not guess or construct one. If no alternatives were found for a category, return an empty array. Never fabricate products.`
 }
 
 export function buildChatPrompt(

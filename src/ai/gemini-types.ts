@@ -103,14 +103,18 @@ export interface GeminiResearchResult {
     brand: string
     retailer: string
     price: string
-    url: string
+    productUrl: string | null
+    sourceUrl?: string
+    url?: string
     reason: string
     ecoScore: number | null
     characteristics: string[]
   }>
   packagingAlternatives: Array<{
     description: string
-    url: string
+    productUrl: string | null
+    sourceUrl?: string
+    url?: string
     retailer: string
   }>
   reusableAlternatives: Array<{
@@ -118,7 +122,9 @@ export interface GeminiResearchResult {
     brand: string
     retailer: string
     price: string
-    url: string
+    productUrl: string | null
+    sourceUrl?: string
+    url?: string
     reason: string
   }>
   summary: string
