@@ -73,7 +73,7 @@ export function TerraChat() {
       <div className="flex-1 overflow-y-auto terra-scroll space-y-3 mb-3 min-h-0" style={{ maxHeight: '300px' }}>
         {chatMessages.length === 0 && (
           <div className="text-center py-6">
-            <div className="text-3xl mb-2">🌍</div>
+            <img src="/assets/terracart-logo.png?v=20260826" alt="TerraCart" className="w-16 h-16 object-contain mx-auto mb-2" />
             <p className="text-sm text-gray-400">
               Ask me anything about the product you're viewing
             </p>

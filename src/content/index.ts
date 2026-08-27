@@ -392,7 +392,7 @@ if ((window as any).__terracartInitialized) {
       transition: 'transform 0.2s, boxShadow 0.2s',
     })
     const btnImg = document.createElement('img')
-    btnImg.src = chrome.runtime.getURL('icons/icon48.png')
+    btnImg.src = chrome.runtime.getURL('icons/icon48.png') + '?v=20260826'
     btnImg.alt = 'TerraCart'
     btnImg.style.width = '32px'
     btnImg.style.height = '32px'
@@ -437,10 +437,10 @@ if ((window as any).__terracartInitialized) {
     if (product && product.name) {
       const price = product.price > 0 ? `${product.currency} ${product.price.toFixed(0)}` : ''
       const brand = product.brand ? `${product.brand} · ` : ''
-      tooltipEl.innerHTML = `<div style="font-weight:600;margin-bottom:2px">✅ Product detected</div><div>${product.name.slice(0, 60)}</div>${price ? `<div style="color:#16a34a;font-weight:600">${brand}${price}</div>` : ''}<div style="color:#999;font-size:10px;margin-top:2px">Click 🌍 to analyze</div>`
+      tooltipEl.innerHTML = `<div style="font-weight:600;margin-bottom:2px">✅ Product detected</div><div>${product.name.slice(0, 60)}</div>${price ? `<div style="color:#16a34a;font-weight:600">${brand}${price}</div>` : ''}<div style="color:#999;font-size:10px;margin-top:2px">Click the TerraCart logo to analyze</div>`
       tooltipEl.style.display = 'block'
     } else if (productCount > 0) {
-      tooltipEl.innerHTML = `<div style="font-weight:600">◎ ${productCount} products on page</div><div style="color:#999;font-size:10px;margin-top:2px">Click 🌍 to scan</div>`
+      tooltipEl.innerHTML = `<div style="font-weight:600">◎ ${productCount} products on page</div><div style="color:#999;font-size:10px;margin-top:2px">Click the TerraCart logo to scan</div>`
       tooltipEl.style.display = 'block'
     } else {
       tooltipEl.style.display = 'none'
@@ -494,6 +494,7 @@ if ((window as any).__terracartInitialized) {
             sendResponse({
               scanResult: r,
               detection: lastDetection,
+              isECommerce: !!lastDetection?.isECommerce || isKnownShoppingSite(window.location.href),
               pageType: detectPageType(),
               isKnownShopping: isKnownShoppingSite(window.location.href),
               url: window.location.href,
@@ -529,7 +530,7 @@ if ((window as any).__terracartInitialized) {
     toast.id = 'terracart-auto-open-toast'
     toast.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px">
-        <img src="${chrome.runtime.getURL('icons/icon48.png')}" alt="TerraCart" style="width:24px;height:24px;border-radius:50%" />
+        <img src="${chrome.runtime.getURL('icons/icon48.png')}?v=20260826" alt="TerraCart" style="width:24px;height:24px;object-fit:contain;border-radius:50%" />
         <div style="flex:1;min-width:0">
           <div style="font-weight:600;font-size:12px;color:#1a1a1a">TerraCart detected a shopping site</div>
           <div style="font-size:11px;color:#6b7280;margin-top:1px">Opening analysis panel...</div>

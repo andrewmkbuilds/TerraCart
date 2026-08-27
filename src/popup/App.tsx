@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import { useTerraStore } from '../store'
-import { EcoScoreRing } from '../components/shared/EcoScoreRing'
-import { calculateEcoScore, generateVerdict } from '../ai/engine'
 import type { Product } from '../types'
 
 export function PopupApp() {
@@ -95,20 +93,12 @@ export function PopupApp() {
     await handleOpenCopilot()
   }
 
-  const currentEcoScore = currentProduct
-    ? calculateEcoScore(currentProduct, preferences)
-    : null
-
-  const verdict = currentEcoScore && currentProduct
-    ? generateVerdict(currentEcoScore, currentProduct)
-    : null
-
   return (
     <div className="w-[340px] min-h-[420px] bg-white flex flex-col">
       {/* Header */}
       <div className="p-5 pb-4 bg-gradient-to-br from-terra-600 to-terra-800 text-white">
         <div className="flex items-center gap-3 mb-3">
-          <img src="/icons/icon48.png" alt="TerraCart" className="w-12 h-12" />
+          <img src="/assets/terracart-logo.png?v=20260826" alt="TerraCart" className="w-12 h-12 object-contain" />
           <div>
             <h1 className="text-xl font-bold">TerraCart</h1>
             <p className="text-sm text-terra-100">Your AI Shopping Copilot</p>
@@ -141,22 +131,8 @@ export function PopupApp() {
           {currentProduct.price > 0 && (
             <div className="text-xs text-gray-500 mt-0.5">{currentProduct.currency} {currentProduct.price.toFixed(2)}</div>
           )}
-          <div className="flex items-center gap-3 mt-2">
-            {currentEcoScore && (
-              <div className="flex items-center gap-2">
-                <EcoScoreRing score={currentEcoScore.overall} size={56} strokeWidth={5} showLabel={false} />
-                <div>
-                  <div className="text-xs text-gray-400">Eco Score</div>
-                  <div className="text-sm font-bold text-gray-700">{currentEcoScore.overall}/10</div>
-                </div>
-              </div>
-            )}
-            {verdict && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-lg">{verdict.emoji}</span>
-                <span className="text-sm font-medium text-gray-700">{verdict.label}</span>
-              </div>
-            )}
+          <div className="mt-2 text-xs text-gray-500">
+            Open TerraCart to calculate the Gemini Eco Score.
           </div>
         </div>
       ) : productDetected ? (

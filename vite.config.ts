@@ -18,13 +18,31 @@ function copyStaticAssets() {
       if (existsSync(iconsSrc)) {
         cpSync(iconsSrc, iconsDest, { recursive: true })
       }
-      // Also copy src/assets icons
-      const assetsSrc = resolve(__dirname, 'src', 'assets')
-      if (existsSync(assetsSrc)) {
-        mkdirSync(iconsDest, { recursive: true })
-        cpSync(assetsSrc, iconsDest, { recursive: true })
+      // The supplied logo is copied explicitly below; stale source icons must not overwrite it.
+      const logoSrc = resolve(__dirname, 'src', 'assets', 'TerraCart Logo.png')
+      const logoDest = resolve(dist, 'assets', 'terracart-logo.png')
+      if (existsSync(logoSrc)) {
+        mkdirSync(resolve(dist, 'assets'), { recursive: true })
+        cpSync(logoSrc, logoDest)
       }
     }
+  }
+}
+
+// Simple plugin to wrap the content script in an IIFE so that
+// repeated injection into the same isolated world does not throw
+// "Identifier 'X' has already been declared".
+function wrapContentScript() {
+  return {
+    name: 'wrap-content-script',
+    generateBundle(options, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        const chunkAny = chunk as any
+        if (chunkAny.name === 'content' && chunkAny.type === 'chunk') {
+          chunkAny.code = `(function(){\n${chunkAny.code}\n})()`
+        }
+      }
+    },
   }
 }
 
@@ -35,10 +53,8 @@ export default defineConfig(({ mode }) => {
   plugins: [
     react(),
     copyStaticAssets(),
+    wrapContentScript(),
   ],
-  define: {
-    __GEMINI_API_KEY__: JSON.stringify(env.VITE_GEMINI_API_KEY || ''),
-  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

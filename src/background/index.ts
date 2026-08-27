@@ -2,12 +2,75 @@
 // TerraCart Background Service Worker
 // Handles: side panel, tab monitoring, message routing,
 // website controls, badge updates, installation,
-// Gemini AI request routing
+// Research request routing
 // ============================================================
 
-import { analyzeProductWithGemini, researchAlternativesWithGemini, chatWithGemini } from '../ai/gemini-service'
-import { isApiKeyConfigured, saveApiKey, getApiKey } from '../ai/gemini-client'
-import type { Product, UserPreferences } from '../types'
+import type { Product } from '../types'
+
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+const RESEARCH_BACKEND_URL = API_BASE ? `${API_BASE}/api/research` : 'http://localhost:8787/api/research'
+const ANALYSIS_BACKEND_URL = API_BASE ? `${API_BASE}/api/analyze` : 'http://localhost:8787/api/analyze'
+
+async function runGeminiAnalysis(product: Product | null) {
+  if (!product || !product.name || !product.url || !product.retailer) {
+    return { success: false, error: 'No product detected. Scan the current shopping page first.' }
+  }
+  console.log('[TerraCart] Sending GEMINI_ANALYZE', { backendUrl: ANALYSIS_BACKEND_URL, product: { name: product.name, brand: product.brand, retailer: product.retailer, url: product.url, category: product.category, price: product.price, currency: product.currency } })
+  try {
+    const response = await fetch(ANALYSIS_BACKEND_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product }),
+    })
+    const responseBody = await response.text()
+    console.log('[TerraCart] Gemini analysis response status:', response.status)
+    if (!response.ok) {
+      let errorBody: any = null
+      try { errorBody = JSON.parse(responseBody) } catch { /* preserve text below */ }
+      return { success: false, error: `Backend HTTP ${response.status}: ${errorBody?.error || responseBody || 'empty response'}` }
+    }
+    const result = JSON.parse(responseBody)
+    return result && typeof result === 'object' ? result : { success: false, error: 'Backend returned invalid analysis JSON.' }
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    console.error('[TerraCart] Gemini analysis FAILED:', detail)
+    return { success: false, error: `Backend connection error: ${detail}` }
+  }
+}
+
+async function runTerraCartResearch(product: Product | null, researchType: 'all' | 'reusable' | 'packaging') {
+  console.log('[TerraCart] Sending TAVILY_RESEARCH', {
+    backendUrl: RESEARCH_BACKEND_URL,
+    researchType,
+    product: product ? { name: product.name, retailer: product.retailer, url: product.url, price: product.price, currency: product.currency, category: product.category } : null,
+  })
+  if (!product || !product.name || !product.url || !product.retailer) {
+    console.warn('[TerraCart] Research rejected: no valid product payload')
+    return { success: false, error: 'No product detected. Scan the current shopping page first.' }
+  }
+  try {
+    const response = await fetch(RESEARCH_BACKEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product, researchType }),
+    })
+    const responseBody = await response.text()
+    console.log('[TerraCart] Backend response status:', response.status)
+    console.log('[TerraCart] Backend response:', responseBody.slice(0, 4000))
+    let result: any = null
+    try { result = responseBody ? JSON.parse(responseBody) : null } catch { /* handled below */ }
+    if (!response.ok) {
+      return { success: false, error: `Backend HTTP ${response.status}: ${result?.error || responseBody || 'empty response'}` }
+    }
+    if (!result || typeof result !== 'object') {
+      return { success: false, error: 'Backend returned an invalid JSON response.' }
+    }
+    console.log('[TerraCart] Alternatives received:', Array.isArray(result.alternatives) ? result.alternatives.length : 0)
+    return result
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    console.error('[TerraCart] Research FAILED:', { backendUrl: RESEARCH_BACKEND_URL, researchType, error: detail })
+    return { success: false, error: `Backend connection error: ${detail}` }
+  }
+}
 
 const STORAGE_KEYS = {
   FIRST_RUN: 'terracart_first_run',
@@ -50,6 +113,7 @@ const KNOWN_SHOPPING_DOMAINS = [
 const tabScanData = new Map<number, unknown>()
 const tabDetectionData = new Map<number, unknown>()
 const pendingAutoOpenTimers = new Map<number, ReturnType<typeof setTimeout>>()
+const contentScriptLoadedTabs = new Set<number>()
 
 function clearTabActivation(tabId: number) {
   tabScanData.delete(tabId)
@@ -115,6 +179,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // ---- Content Script Ready (auto-open logic) ----
     case 'CONTENT_SCRIPT_READY': {
       if (sender.tab?.id) {
+        contentScriptLoadedTabs.add(sender.tab.id)
         const tabUrl = message.data?.url || ''
         
         // CRITICAL: Check blocklist BEFORE any auto-open logic
@@ -152,6 +217,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     type: 'AUTO_OPEN_PENDING',
                     delay: delayMs,
                   }).catch(() => {})
+                }
+
+                // Clear any existing auto-open timer for this tab
+                const existingTimer = pendingAutoOpenTimers.get(tabId)
+                if (existingTimer) {
+                  clearTimeout(existingTimer)
+                  pendingAutoOpenTimers.delete(tabId)
                 }
 
                 const timerId = setTimeout(() => {
@@ -198,6 +270,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case 'PAGE_SCANNED': {
       if (sender.tab?.id && message.data) {
         tabScanData.set(sender.tab.id, message.data)
+        contentScriptLoadedTabs.add(sender.tab.id)
         if (message.data.primaryProduct) {
           updateBadgeForTab(sender.tab.id, 'product')
         } else if (message.data.productCount > 0) {
@@ -270,7 +343,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               tabScanData.set(tabId, { ...result, timestamp: Date.now() })
             }
             safeRespond(result)
-          } else if (!responded) {
+          } else if (!responded && !contentScriptLoadedTabs.has(tabId)) {
             // Content script not loaded — inject it then wait for it to initialize
             chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }).then(() => {
               // Give the content script 2s to call init() and set up listeners
@@ -289,6 +362,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }).catch(() => {
               safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
             })
+          } else if (!responded) {
+            safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
           }
         })
       })
@@ -382,76 +457,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
     }
 
-    // ---- Gemini AI ----
-    case 'GET_API_KEY': {
-      isApiKeyConfigured().then(configured => {
-        getApiKey().then(key => {
-          sendResponse({ configured, hasKey: !!key })
-        })
-      })
-      return true
-    }
-
-    case 'SET_API_KEY': {
-      if (message.key) {
-        saveApiKey(String(message.key)).then(() => sendResponse({ success: true }))
-      } else {
-        sendResponse({ success: false, error: 'No key provided' })
-      }
-      return true
-    }
-
+    // ---- Server-side Tavily research ----
     case 'GEMINI_ANALYZE': {
-      const product = message.product as Product
-      const preferences = message.preferences as UserPreferences
-      if (!product) { sendResponse({ error: 'No product provided' }); return false }
-      analyzeProductWithGemini(product, preferences).then(result => {
-        sendResponse(result)
-      }).catch((err: unknown) => {
-        sendResponse({ analysis: null, sources: [], error: String(err) })
-      })
+      runGeminiAnalysis((message.product || null) as Product | null)
+        .then(sendResponse)
+        .catch((error: unknown) => sendResponse({ success: false, error: `Analysis proxy error: ${error instanceof Error ? error.message : String(error)}` }))
       return true
     }
 
-    case 'GEMINI_RESEARCH': {
-      console.log('TerraCart: GEMINI_RESEARCH received', { product: message.product?.name, type: message.researchType })
-      const rProduct = message.product as Product
-      const rPrefs = message.preferences as UserPreferences
-      const rType = message.researchType as 'alternatives' | 'reusable' | 'packaging' | 'all'
-      if (!rProduct) { sendResponse({ error: 'No product provided' }); return false }
-      researchAlternativesWithGemini(rProduct, rPrefs, rType || 'all').then(result => {
-        const alternatives = [
-          ...(result.research?.alternatives || []),
-          ...(result.research?.reusableAlternatives || []),
-          ...(result.research?.packagingAlternatives || []),
-        ]
-        const response = {
-          ...result,
-          success: !result.error && !!result.research,
-          alternatives,
-          researchSummary: result.research?.summary || (result.error ? undefined : 'No verified alternatives found.'),
-          error: result.error || (!result.research ? 'Research returned no response' : undefined),
-        }
-        console.log('TerraCart: GEMINI_RESEARCH result', { success: response.success, alternatives: alternatives.length, error: response.error })
-        sendResponse(response)
-      }).catch((err: unknown) => {
-        console.error('TerraCart: GEMINI_RESEARCH error', err)
-        sendResponse({ success: false, research: null, alternatives: [], sources: [], searchQueries: [], error: 'Research request failed: ' + String(err) })
-      })
-      return true
-    }
-
-    case 'GEMINI_CHAT': {
-      const chatProduct = message.product as Product | null
-      const chatPrefs = message.preferences as UserPreferences
-      const chatMsg = message.message as string
-      const chatHistory = message.chatHistory as Array<{ role: 'user' | 'assistant'; content: string }> || []
-      if (!chatMsg) { sendResponse({ content: 'No message provided', sources: [] }); return false }
-      chatWithGemini(chatMsg, chatProduct, chatPrefs, chatHistory).then(result => {
-        sendResponse(result)
-      }).catch((err: unknown) => {
-        sendResponse({ content: 'Error: ' + String(err), sources: [] })
-      })
+    case 'TAVILY_RESEARCH': {
+      const researchType = message.researchType === 'reusable' || message.researchType === 'packaging' ? message.researchType : 'all'
+      console.log('[TerraCart] TAVILY_RESEARCH received', { researchType, hasProduct: !!message.product, productName: message.product?.name || '' })
+      runTerraCartResearch((message.product || null) as Product | null, researchType)
+        .then(sendResponse)
+        .catch((error: unknown) => {
+          console.error('TerraCart research proxy error:', error)
+          sendResponse({ success: false, error: `Research proxy error: ${error instanceof Error ? error.message : String(error)}` })
+        })
       return true
     }
   }
@@ -537,6 +559,7 @@ if (chrome.webNavigation?.onReferenceFragmentUpdated) {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearTabActivation(tabId)
+  contentScriptLoadedTabs.delete(tabId)
 })
 
 // ---- Badge Management ----

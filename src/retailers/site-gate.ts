@@ -4,14 +4,6 @@
  * A compact hard-block list is a safety net, not the whole system.
  */
 
-export type SiteGateResult = {
-  blocked: boolean
-  knownShopping: boolean
-  isEcommerce: boolean
-  hostname: string
-  reason: string
-}
-
 const KNOWN_SHOPPING_HOSTS = [
   'amazon.com', 'amazon.ae', 'amazon.co.uk', 'amazon.de', 'amazon.fr',
   'amazon.co.jp', 'amazon.in', 'amazon.ca', 'amazon.com.au', 'amazon.sa',
@@ -103,52 +95,3 @@ export function looksLikeProductUrl(url: string): boolean {
     return false
   }
 }
-
-export function evaluateSiteGate(
-  url: string,
-  detection?: { isECommerce?: boolean; confidence?: number } | null,
-): SiteGateResult {
-  const hostname = hostnameFromUrl(url)
-  if (!hostname || /^(chrome|chrome-extension|edge|about|devtools):/i.test(url)) {
-    return { blocked: true, knownShopping: false, isEcommerce: false, hostname, reason: 'browser-page' }
-  }
-  if (isHardBlockedHost(url)) {
-    return { blocked: true, knownShopping: false, isEcommerce: false, hostname, reason: 'hard-block' }
-  }
-  const knownShopping = isKnownShoppingHost(url)
-  const detected = !!(detection?.isECommerce && (detection.confidence ?? 0) >= 55)
-  const isEcommerce = knownShopping || detected
-  return {
-    blocked: false,
-    knownShopping,
-    isEcommerce,
-    hostname,
-    reason: knownShopping ? 'known-shopping' : detected ? 'detected' : 'not-ecommerce',
-  }
-}
-
-export const MANIFEST_EXCLUDE_MATCHES = [
-  '*://*.google.com/*',
-  '*://google.com/*',
-  '*://gemini.google.com/*',
-  '*://*.youtube.com/*',
-  '*://youtube.com/*',
-  '*://chatgpt.com/*',
-  '*://*.chatgpt.com/*',
-  '*://chat.openai.com/*',
-  '*://*.openai.com/*',
-  '*://claude.ai/*',
-  '*://*.claude.ai/*',
-  '*://*.github.com/*',
-  '*://github.com/*',
-  '*://*.reddit.com/*',
-  '*://*.wikipedia.org/*',
-  '*://*.instagram.com/*',
-  '*://*.facebook.com/*',
-  '*://*.x.com/*',
-  '*://*.twitter.com/*',
-  '*://*.linkedin.com/*',
-  '*://mail.google.com/*',
-  '*://docs.google.com/*',
-  '*://drive.google.com/*',
-]

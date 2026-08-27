@@ -24,7 +24,7 @@ export function OnboardingApp() {
       <div className="w-full max-w-md">
         {step === 'welcome' && (
           <div className="bg-white rounded-2xl shadow-2xl p-8 text-center animate-slide-up">
-            <img src="/icons/icon256.png" alt="TerraCart Logo" className="w-24 h-24 mx-auto mb-4" />
+            <img src="/assets/terracart-logo.png?v=20260826" alt="TerraCart Logo" className="w-24 h-24 mx-auto mb-4 object-contain" />
             <h1 className="text-2xl font-bold text-gray-900 mb-2">
               Welcome to TerraCart
             </h1>
@@ -161,7 +161,7 @@ export function OnboardingApp() {
                 onClick={handleComplete}
                 className="w-full terra-btn-primary py-3 text-base"
               >
-                Enable TerraCart 🌍
+                Enable TerraCart
               </button>
               <button
                 onClick={() => setStep('permissions')}

@@ -10,12 +10,10 @@ import { PackagingAnalysis } from '../components/shared/PackagingAnalysis'
 import { EcoChecklist } from '../components/checklist/EcoChecklist'
 import { TerraChat } from '../components/chat/TerraChat'
 import {
-  calculateEcoScore,
   generateVerdict,
   generateChecklist,
   analyzePackaging,
   detectGreenwashing,
-  generateRecommendations,
 } from '../ai/engine'
 import type { Product, ProductAnalysis, PageScanResult, Alternative } from '../types'
 
@@ -105,7 +103,7 @@ export function App() {
     currentProductAnalysis, preferences, savedProducts, history, patterns,
     isAnalyzing, researchSteps, recommendations,
     setProductAnalysis, setAnalyzing, setResearchSteps,
-    addSavedProduct, removeSavedProduct, addHistoryEntry, setRecommendations, addChatMessage,
+    addSavedProduct, removeSavedProduct, addHistoryEntry, addChatMessage,
   } = store
 
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -117,21 +115,13 @@ export function App() {
   const [currentUrl, setCurrentUrl] = useState('')
   const [currentTitle, setCurrentTitle] = useState('')
   const [websiteEnabled, setWebsiteEnabled] = useState(true)
-  const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null)
-  const [geminiError, setGeminiError] = useState<string | null>(null)
+  const [researchError, setResearchError] = useState<string | null>(null)
   const [shoppingDetected, setShoppingDetected] = useState<boolean | null>(null)
   const [isKnownShopping, setIsKnownShopping] = useState(false)
   const [siteInactive, setSiteInactive] = useState(false)
   const [pageType, setPageType] = useState<string | null>(null)
   const [retailerName, setRetailerName] = useState<string>('')
   const [scanAttemptedAt, setScanAttemptedAt] = useState<number>(0)
-
-  // ---- Check Gemini API key on mount ----
-  useEffect(() => {
-    sendMessage({ type: 'GET_API_KEY' }).then(result => {
-      setGeminiConfigured(result?.configured ?? false)
-    })
-  }, [])
 
   // ---- Request scan from content script on mount ----
   useEffect(() => {
@@ -181,7 +171,7 @@ export function App() {
   const requestScan = async () => {
     console.log('TerraCart: requestScan called')
     setIsScanning(true)
-    setGeminiError(null)
+    setResearchError(null)
     try {
       const tabInfo = await sendMessage({ type: 'GET_CURRENT_TAB' })
       console.log('TerraCart: Current tab:', tabInfo)
@@ -268,10 +258,10 @@ export function App() {
       const scanResult = await sendMessage({ type: 'SCAN_PAGE' })
       console.log('TerraCart: Scan result:', scanResult)
       if (!scanResult) {
-        setGeminiError('No response from background service. Try reloading the extension in chrome://extensions/.')
+        setResearchError('No response from background service. Try reloading the extension in chrome://extensions/.')
       } else if (scanResult.error && scanResult.error !== 'Non-shopping site') {
         if (!scanResult.error.includes('Cannot scan') && !scanResult.error.includes('No active tab')) {
-          setGeminiError(scanResult.error)
+          setResearchError(scanResult.error)
         }
       } else {
         setSiteInactive(false)
@@ -280,7 +270,7 @@ export function App() {
       }
     } catch (err: any) {
       console.warn('TerraCart: Scan request failed', err)
-      setGeminiError('Scan failed: ' + (err?.message || String(err)))
+      setResearchError('Scan failed: ' + (err?.message || String(err)))
     } finally {
       setIsScanning(false)
       setScanAttemptedAt(Date.now())
@@ -301,7 +291,7 @@ export function App() {
         pageTitle: data.pageTitle || '',
         timestamp: Date.now(),
       })
-      analyzeProduct(data.primaryProduct)
+      if (!isAnalyzing) analyzeProduct(data.primaryProduct)
     } else if ((data.productCount || 0) > 0) {
       console.log('TerraCart: Found products:', data.productCount)
       setPageScanResult({
@@ -333,30 +323,27 @@ export function App() {
     if (result.primaryProduct) {
       console.log('TerraCart: Found primaryProduct in result:', result.primaryProduct.name)
       setDetectedProduct(result.primaryProduct)
-      analyzeProduct(result.primaryProduct)
+      if (!isAnalyzing) analyzeProduct(result.primaryProduct)
     } else if (products.length > 0) {
       console.log('TerraCart: Found products in result:', products.length)
       setDetectedProduct(products[0])
-      analyzeProduct(products[0])
+      if (!isAnalyzing) analyzeProduct(products[0])
     } else {
       console.log('TerraCart: No products found in scan result')
     }
   }
 
-  // ---- Analyze a product — uses Gemini when available, local fallback otherwise ----
+  // ---- Analyze a product locally ----
   const analyzeProduct = useCallback(async (product: Product) => {
     setAnalyzing(true)
-    setGeminiError(null)
+    setResearchError(null)
     setResearchSteps(DEFAULT_RESEARCH_STEPS.map(s => ({ ...s, status: 'pending' as const })))
 
     const steps = DEFAULT_RESEARCH_STEPS.map(s => ({ ...s }))
 
-    // Check if Gemini is available
-    const apiKeyStatus = await sendMessage({ type: 'GET_API_KEY' })
-    const useGemini = apiKeyStatus?.configured === true
+    const useRemoteAnalysis = true
 
-    if (useGemini) {
-      // Real Gemini analysis
+    if (useRemoteAnalysis) {
       try {
         steps[0].status = 'in-progress'; setResearchSteps([...steps])
         const result = await sendMessage({
@@ -380,60 +367,60 @@ export function App() {
         steps[4].status = 'complete'; steps[5].status = 'in-progress'; setResearchSteps([...steps])
         await new Promise(r => setTimeout(r, 150))
 
-        steps[5].status = 'complete'; steps[6].status = 'in-progress'; setResearchSteps([...steps])
-        await new Promise(r => setTimeout(r, 150))
-
-        steps[6].status = 'complete'; steps[7].status = 'in-progress'; setResearchSteps([...steps])
-        await new Promise(r => setTimeout(r, 150))
-
-        steps[7].status = 'complete'; setResearchSteps([...steps])
+        steps[5].status = 'complete'; setResearchSteps([...steps])
 
         if (result?.error) {
-          setGeminiError(result.error)
+          setResearchError(result.error)
         }
 
         if (result?.analysis) {
-          // Merge Gemini analysis with local data
-          const geminiAnalysis = result.analysis
+          // Merge remote analysis with local data
+          const remoteAnalysis = result.analysis
+          const confidenceScore = Math.max(0, Math.min(100, Number(remoteAnalysis.confidence) || 0))
+          const confidence = confidenceScore >= 75 ? 'high' as const : confidenceScore >= 45 ? 'medium' as const : 'low' as const
+          const dimension = (name: string) => {
+            const value = Number(remoteAnalysis.dimensions?.[name])
+            return Number.isFinite(value) ? Math.max(0, Math.min(10, value)) : 0
+          }
           const ecoScore = {
-            overall: geminiAnalysis.ecoScore?.overall ?? calculateEcoScore(product, preferences).overall,
+            overall: Math.round(Number(remoteAnalysis.ecoScore) * 10) / 10,
             breakdown: {
-              reusability: geminiAnalysis.ecoScore?.reusability ?? calculateEcoScore(product, preferences).breakdown.reusability,
-              durability: geminiAnalysis.ecoScore?.durability ?? calculateEcoScore(product, preferences).breakdown.durability,
-              packaging: geminiAnalysis.ecoScore?.packaging ?? calculateEcoScore(product, preferences).breakdown.packaging,
-              repairability: geminiAnalysis.ecoScore?.repairability ?? calculateEcoScore(product, preferences).breakdown.repairability,
-              materialConsiderations: geminiAnalysis.ecoScore?.materialConsiderations ?? calculateEcoScore(product, preferences).breakdown.materialConsiderations,
+              reusability: dimension('reusability'),
+              durability: dimension('durability'),
+              packaging: dimension('packaging'),
+              repairability: dimension('repairability'),
+              materialConsiderations: dimension('materials'),
             },
-            confidence: geminiAnalysis.confidence || 'medium',
-            reasoning: geminiAnalysis.reasoning || calculateEcoScore(product, preferences).reasoning,
-            sources: (geminiAnalysis.researchSources || []).map((s: any) => ({
-              name: s.name,
+            confidence,
+            reasoning: [remoteAnalysis.scoreExplanation, ...(remoteAnalysis.strengths || []).map((item: string) => `Strength: ${item}`), ...(remoteAnalysis.weaknesses || []).map((item: string) => `Limitation: ${item}`)].filter(Boolean),
+            sources: (result.evidence || []).map((s: any) => ({
+              name: s.name || s.title,
               url: s.url,
-              type: s.type || 'ai-inference',
-              reliability: s.type === 'manufacturer' ? 'high' as const : 'medium' as const,
+              type: s.type || 'verified',
+              reliability: s.reliability || 'medium',
             })),
             aiGenerated: true,
-            disclaimer: 'This score is a TerraCart AI Estimate powered by Gemini. It is not a scientific certification.',
+            disclaimer: `Gemini AI estimate based on available product evidence (${remoteAnalysis.informationQuality} information quality, ${confidenceScore}% confidence). It is not a scientific certification.`,
+            confidenceScore,
+            informationQuality: remoteAnalysis.informationQuality,
           }
 
           const verdict = generateVerdict(ecoScore, product)
-          // Override verdict if Gemini provided one
-          if (geminiAnalysis.verdict) {
+          // Override verdict if remote analysis provided one
+          if (remoteAnalysis.verdict) {
             const verdictMap: Record<string, typeof verdict> = {
-              'great-choice': { level: 'great-choice', label: 'Great Choice', emoji: '🌱', explanation: geminiAnalysis.reasoning?.[0] || 'Strong sustainability profile', confidence: geminiAnalysis.confidence || 'medium', factors: geminiAnalysis.reasoning?.slice(0, 3) },
-              'good-choice': { level: 'good-choice', label: 'Good Choice', emoji: '👍', explanation: geminiAnalysis.reasoning?.[0] || 'Good overall choice', confidence: geminiAnalysis.confidence || 'medium', factors: geminiAnalysis.reasoning?.slice(0, 3) },
-              'consider-alternatives': { level: 'consider-alternatives', label: 'Consider Alternatives', emoji: '⚠️', explanation: geminiAnalysis.reasoning?.[0] || 'Alternatives may be worth exploring', confidence: geminiAnalysis.confidence || 'medium', factors: geminiAnalysis.reasoning?.slice(0, 3) },
-              'limited-info': { level: 'limited-info', label: 'Limited Information', emoji: '🔎', explanation: geminiAnalysis.reasoning?.[0] || 'Insufficient data for a strong recommendation', confidence: geminiAnalysis.confidence || 'low', factors: geminiAnalysis.reasoning?.slice(0, 3) },
+              'great-choice': { level: 'great-choice', label: 'Great Choice', emoji: '🌱', explanation: remoteAnalysis.scoreExplanation, confidence, factors: remoteAnalysis.strengths?.slice(0, 3) },
+              'good-choice': { level: 'good-choice', label: 'Good Choice', emoji: '👍', explanation: remoteAnalysis.scoreExplanation, confidence, factors: remoteAnalysis.strengths?.slice(0, 3) },
+              'consider-alternatives': { level: 'consider-alternatives', label: 'Consider Alternatives', emoji: '⚠️', explanation: remoteAnalysis.scoreExplanation, confidence, factors: remoteAnalysis.weaknesses?.slice(0, 3) },
+              'limited-info': { level: 'limited-info', label: 'Limited Information', emoji: '🔎', explanation: remoteAnalysis.scoreExplanation, confidence, factors: remoteAnalysis.weaknesses?.slice(0, 3) },
             }
-            if (verdictMap[geminiAnalysis.verdict]) {
-              Object.assign(verdict, verdictMap[geminiAnalysis.verdict])
-            }
+            Object.assign(verdict, verdictMap[verdict.level])
           }
 
           const checklist = generateChecklist(product, preferences)
           const packagingAnalysis = analyzePackaging(product)
-          const greenwashing = geminiAnalysis.greenwashingWarning
-            ? { detected: true, claims: [geminiAnalysis.greenwashingWarning], warning: geminiAnalysis.greenwashingWarning, confidence: 'medium' as const }
+          const greenwashing = remoteAnalysis.greenwashingWarning
+            ? { detected: true, claims: [remoteAnalysis.greenwashingWarning], warning: remoteAnalysis.greenwashingWarning, confidence: 'medium' as const }
             : detectGreenwashing(product)
 
           const analysis: ProductAnalysis = {
@@ -446,9 +433,9 @@ export function App() {
             packagingAnalysis,
             greenwashingDetection: greenwashing || undefined,
             researchSteps: steps,
-            confidence: geminiAnalysis.confidence || ecoScore.confidence,
+            confidence,
             timestamp: Date.now(),
-            personalizedInsight: geminiAnalysis.packagingAnalysis,
+            personalizedInsight: remoteAnalysis.scoreExplanation,
           }
 
           setProductAnalysis(analysis)
@@ -456,7 +443,7 @@ export function App() {
           // Auto-trigger research when verdict suggests alternatives
           if (verdict.level === 'consider-alternatives' || verdict.level === 'limited-info') {
             sendMessage({
-              type: 'GEMINI_RESEARCH',
+              type: 'TAVILY_RESEARCH',
               product,
               preferences,
               researchType: 'all',
@@ -529,20 +516,23 @@ export function App() {
             }).catch(() => {}) // silent — research is optional enhancement
           }
         } else {
-          // Gemini failed, fall back to local analysis
-          performLocalAnalysis(product, steps)
+          // Never substitute a heuristic score when Gemini is unavailable.
+          setProductAnalysis(null)
+          setResearchError(result?.error || 'Eco Score unavailable. TerraCart could not obtain enough reliable information to calculate an AI Eco Score.')
         }
-      } catch {
-        performLocalAnalysis(product, steps)
+      } catch (error: any) {
+        setProductAnalysis(null)
+        setResearchError(`Eco Score unavailable. ${error?.message || String(error)}`)
       }
     } else {
-      // No Gemini — use local analysis
+      // Gemini analysis is required for the Eco Score.
       for (let i = 0; i < steps.length; i++) {
         steps[i].status = 'in-progress'; setResearchSteps([...steps])
         await new Promise(r => setTimeout(r, 100 + Math.random() * 150))
         steps[i].status = 'complete'; setResearchSteps([...steps])
       }
-      performLocalAnalysis(product, steps)
+      setProductAnalysis(null)
+      setResearchError('Eco Score unavailable. TerraCart could not obtain enough reliable information to calculate an AI Eco Score.')
     }
 
     setAnalyzing(false)
@@ -588,33 +578,6 @@ export function App() {
     }
   }, [preferences, savedProducts, patterns])
 
-  // ---- Local analysis fallback ----
-  function performLocalAnalysis(product: Product, steps: any[]) {
-    const ecoScore = calculateEcoScore(product, preferences)
-    const verdict = generateVerdict(ecoScore, product)
-    const checklist = generateChecklist(product, preferences)
-    const packagingAnalysis = analyzePackaging(product)
-    const greenwashing = detectGreenwashing(product)
-
-    const analysis: ProductAnalysis = {
-      productId: product.id,
-      product,
-      ecoScore,
-      verdict,
-      alternatives: [],
-      checklist,
-      packagingAnalysis,
-      greenwashingDetection: greenwashing || undefined,
-      researchSteps: steps,
-      confidence: ecoScore.confidence,
-      timestamp: Date.now(),
-    }
-    setProductAnalysis(analysis)
-
-    const recs = generateRecommendations(product, savedProducts.map(s => s.product), preferences, patterns)
-    setRecommendations(recs)
-  }
-
   const handleSaveProduct = () => {
     if (!detectedProduct || !currentProductAnalysis) return
     const existing = savedProducts.find(s => s.product.id === detectedProduct.id)
@@ -648,7 +611,7 @@ export function App() {
       <header className="bg-white border-b border-gray-100 px-4 py-3 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <img src="/icons/icon48.png" alt="TerraCart" className="w-8 h-8" />
+            <img src="/assets/terracart-logo.png?v=20260826" alt="TerraCart" className="w-8 h-8 object-contain" />
             <div>
               <h1 className="font-bold text-sm text-gray-900">TerraCart</h1>
               <p className="text-[10px] text-gray-400">Your AI Shopping Copilot</p>
@@ -706,14 +669,12 @@ export function App() {
           <InactiveState />
         ) : product ? (
           <div className="p-4 space-y-4">
-            {/* Gemini error banner */}
-            {geminiError && geminiError !== 'GEMINI_API_KEY_MISSING' && (
+            {/* Research error banner */}
+            {researchError && (
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
-                ⚠️ {geminiError.includes('GEMINI_API_KEY_INVALID')
-                  ? 'API key issue. Please try again later.'
-                  : geminiError.includes('Rate limited')
+                ⚠️ {researchError.includes('Rate limited')
                   ? 'Rate limited. Please wait a moment and try again.'
-                  : 'AI analysis had an issue: ' + geminiError.slice(0, 100)}
+                  : researchError.slice(0, 160)}
               </div>
             )}
 
@@ -729,10 +690,18 @@ export function App() {
                 isAnalyzing={isAnalyzing}
                 researchSteps={researchSteps}
                 onOpenRetailer={() => window.open(product.url, '_blank')}
-                geminiConfigured={geminiConfigured === true}
+                researchConfigured={true}
                 onResearchAlternatives={() => setActiveTab('alternatives')}
                 currentUrl={currentUrl}
               />
+            )}
+            {activeTab === 'overview' && product && !analysis && !isAnalyzing && (
+              <div className="terra-card p-4 border-amber-200 bg-amber-50">
+                <div className="text-sm font-semibold text-amber-800">Eco Score unavailable</div>
+                <p className="text-xs text-amber-700 mt-2">TerraCart could not obtain enough reliable information to calculate an AI Eco Score.</p>
+                {researchError && <p className="text-xs text-amber-700 mt-2">{researchError}</p>}
+                <button onClick={() => analyzeProduct(product)} className="terra-btn-outline text-xs mt-3">Retry analysis</button>
+              </div>
             )}
             {activeTab === 'alternatives' && product && analysis && (
               <AlternativesTab product={product} analysis={analysis} onSelectProduct={(p) => { setDetectedProduct(p); setActiveTab('overview'); analyzeProduct(p); }} />
@@ -758,12 +727,12 @@ export function App() {
             retailer={retailerName || (currentUrl ? new URL(currentUrl).hostname.replace('www.', '') : '')}
             pageType={pageType}
             onScan={requestScan}
-            showGeminiPrompt={geminiConfigured === false}
-            onSetupGemini={() => setActivePanel('settings')}
+            showResearchPrompt={false}
+            onSetupResearch={() => setActivePanel('settings')}
             isAnalyzing={isAnalyzing}
           />
         ) : (
-          <EmptyState onScan={requestScan} showGeminiPrompt={geminiConfigured === false} onSetupGemini={() => setActivePanel('settings')} />
+          <EmptyState onScan={requestScan} showResearchPrompt={false} onSetupResearch={() => setActivePanel('settings')} />
         )}
       </main>
 
@@ -794,43 +763,19 @@ export function App() {
 }
 
 // ============================================================
-// Gemini Setup Prompt
-// ============================================================
-function GeminiSetupPrompt({ onConfigure }: { onConfigure: () => void }) {
-  return (
-    <div className="terra-card p-4 border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
-      <div className="flex items-start gap-3">
-        <span className="text-2xl">🤖</span>
-        <div className="flex-1">
-          <h3 className="text-sm font-bold text-gray-800 mb-1">Enable AI Research</h3>
-          <p className="text-xs text-gray-600 leading-relaxed mb-2">
-            Connect TerraCart to Google Gemini for real product research, web search, and personalized recommendations.
-          </p>
-          <p className="text-[10px] text-gray-400 mb-3">
-            Free API key from Google AI Studio (aistudio.google.com)
-          </p>
-          <button onClick={onConfigure} className="terra-btn-primary text-xs">
-            ⚙️ Configure Gemini API Key
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ============================================================
 // Overview Tab
 // ============================================================
 function OverviewTab({
   product, analysis, isSaved, showScoreBreakdown, onToggleScoreBreakdown,
   onSave, onReanalyze, isAnalyzing, researchSteps, onOpenRetailer,
-  geminiConfigured, onResearchAlternatives, currentUrl,
+  researchConfigured, onResearchAlternatives, currentUrl,
 }: {
   product: Product; analysis: ProductAnalysis; isSaved: boolean
   showScoreBreakdown: boolean; onToggleScoreBreakdown: () => void
   onSave: () => void; onReanalyze: () => void; isAnalyzing: boolean
   researchSteps: any[]; onOpenRetailer: () => void
-  geminiConfigured: boolean; onResearchAlternatives: () => void; currentUrl: string
+  researchConfigured: boolean; onResearchAlternatives: () => void; currentUrl: string
 }) {
   const isCurrentPage = currentUrl && (
     product.url === currentUrl ||
@@ -911,6 +856,9 @@ function OverviewTab({
             <div className="mt-3 animate-slide-up"><ScoreBreakdown breakdown={analysis.ecoScore.breakdown} /></div>
           )}
           <p className="text-[10px] text-gray-400 text-center mt-2 italic">{analysis.ecoScore.disclaimer}</p>
+          {analysis.ecoScore.confidenceScore !== undefined && (
+            <p className="text-xs text-gray-500 text-center mt-2">Confidence: {analysis.ecoScore.confidenceScore}% · {analysis.ecoScore.informationQuality} information quality</p>
+          )}
         </div>
       )}
 
@@ -932,7 +880,7 @@ function OverviewTab({
         </div>
       )}
 
-      {/* Gemini Insight */}
+      {/* Research insight */}
       {analysis && !isAnalyzing && analysis.personalizedInsight && (
         <div className="terra-card p-4 border-blue-100 bg-blue-50/50">
           <div className="terra-label mb-2 text-blue-700">🤖 AI Insight</div>
@@ -941,15 +889,15 @@ function OverviewTab({
       )}
 
       {/* 🔎 Research Better Options — THE KEY BUTTON */}
-      {analysis && !isAnalyzing && geminiConfigured && (
+      {analysis && !isAnalyzing && researchConfigured && (
         <div className="terra-card p-4 border-terra-200 bg-gradient-to-br from-terra-50 to-emerald-50">
           <ResearchAlternativesButton product={product} analysis={analysis} onComplete={onResearchAlternatives} />
         </div>
       )}
 
-      {!geminiConfigured && analysis && !isAnalyzing && (
+      {!researchConfigured && analysis && !isAnalyzing && (
         <div className="terra-card p-4 border-amber-200 bg-amber-50/50">
-          <p className="text-xs text-amber-700 mb-2">💡 For real web research and alternatives, configure your Gemini API key in Settings.</p>
+          <p className="text-xs text-amber-700 mb-2">💡 Start source-backed web research from the Alternatives tab.</p>
         </div>
       )}
 
@@ -962,7 +910,7 @@ function OverviewTab({
 }
 
 // ============================================================
-// Research Alternatives Button — triggers real Gemini web research
+// Research Alternatives Button — triggers real Tavily web research
 // ============================================================
 function ResearchAlternativesButton({
   product,
@@ -992,10 +940,11 @@ function ResearchAlternativesButton({
     if (!product || !product.name || !product.url || !product.retailer) {
       console.error('TerraCart: No product available for research')
       setError('TerraCart could not identify the current product. Rescan the page and try again.')
+      setIsResearching(false)
       return
     }
 
-    setResearchStatus(['Connecting to Gemini AI...'])
+    setResearchStatus(['Connecting to TerraCart research...'])
 
     // Show real progress at intervals while API call is in-flight
     const timers: ReturnType<typeof setTimeout>[] = []
@@ -1010,9 +959,9 @@ function ResearchAlternativesButton({
     }, 8000))
 
     try {
-      console.log('TerraCart: Sending GEMINI_RESEARCH request...')
+      console.log('TerraCart: Sending Tavily research request...')
       const result = await sendMessage({
-        type: 'GEMINI_RESEARCH',
+        type: 'TAVILY_RESEARCH',
         product,
         preferences,
         researchType: 'all',
@@ -1045,7 +994,7 @@ function ResearchAlternativesButton({
           packagingAlternatives: research.packagingAlternatives?.length || 0,
         })
         
-        // Convert Gemini research results into Alternative objects
+        // Convert source-backed research results into Alternative objects
         const alternatives: Alternative[] = []
 
         if (research.alternatives) {
@@ -1179,9 +1128,7 @@ function ResearchAlternativesButton({
     return (
       <div>
         <p className="text-xs text-amber-600 mb-2">
-          {error.includes('GEMINI_API_KEY_MISSING') || error.includes('GEMINI_API_KEY_INVALID')
-            ? 'Please configure your Gemini API key in Settings.'
-            : 'Research error: ' + error.slice(0, 100)}
+          {'Research error: ' + error.slice(0, 100)}
         </p>
         <button onClick={handleResearch} className="terra-btn-outline text-xs">Retry</button>
       </div>
@@ -1217,7 +1164,7 @@ function AlternativesTab({
   onSelectProduct: (p: Product) => void
 }) {
   const { preferences, setProductAnalysis, currentProductAnalysis } = useTerraStore()
-  const [researchState, setResearchState] = useState<'idle' | 'researching' | 'done' | 'error'>('idle')
+  const [researchState, setResearchState] = useState<'idle' | 'researching' | 'success' | 'error' | 'no_results'>('idle')
   const [researchType, setResearchType] = useState<'all' | 'reusable' | 'packaging' | null>(null)
   const [researchStatus, setResearchStatus] = useState<string[]>([])
   const [researchError, setResearchError] = useState<string | null>(null)
@@ -1226,20 +1173,20 @@ function AlternativesTab({
   const researchCache = useRef(new Map<string, { alternatives: Alternative[]; sources: Array<{ name: string; url: string }> }>())
 
   const handleDeepResearch = async (type: 'alternatives' | 'reusable' | 'packaging' | 'all') => {
-    console.log('TerraCart: Starting research', { type, product: product?.name })
+    console.log('[TerraCart] Research button clicked', { type, product: product?.name })
     const cacheKey = `${product.url || product.id}::${type}`
     const cached = researchCache.current.get(cacheKey)
     if (cached) {
       setWebAlternatives(cached.alternatives)
       setResearchSources(cached.sources)
-      setResearchState(cached.alternatives.length > 0 ? 'done' : 'error')
+      setResearchState(cached.alternatives.length > 0 ? 'success' : 'no_results')
       setResearchError(cached.alternatives.length > 0 ? null : 'Research completed, but no verified alternatives were found.')
       return
     }
     
     setResearchState('researching')
     setResearchType(type === 'alternatives' ? 'all' : type)
-    setResearchStatus(['Connecting to Gemini AI...'])
+    setResearchStatus(['Connecting to TerraCart research...'])
     setResearchError(null)
     setWebAlternatives([])
     setResearchSources([])
@@ -1257,15 +1204,17 @@ function AlternativesTab({
     }, 9000))
 
     try {
-      console.log('TerraCart: Sending GEMINI_RESEARCH request...')
+      console.log('[TerraCart] Research type:', type)
+      console.log('[TerraCart] Product:', { name: product.name, retailer: product.retailer, url: product.url, price: product.price, currency: product.currency, category: product.category })
+      console.log('[TerraCart] Sending TAVILY_RESEARCH')
       const result = await sendMessage({
-        type: 'GEMINI_RESEARCH',
+        type: 'TAVILY_RESEARCH',
         product,
         preferences,
         researchType: type,
       }, 60000) // 60 second timeout for research
 
-      console.log('TerraCart: Research result received:', result)
+      console.log('[TerraCart] Research result received:', result)
 
       if (!result) {
         console.error('TerraCart: No response from background')
@@ -1275,8 +1224,8 @@ function AlternativesTab({
       }
 
       if (result.success === false || result.error) {
-        console.error('TerraCart: Research error:', result.error)
-        setResearchError(result.error)
+        console.error('[TerraCart] Research FAILED:', result.error)
+        setResearchError(`Research failed. ${result.error}`)
         setResearchState('error')
         return
       }
@@ -1288,7 +1237,7 @@ function AlternativesTab({
       }
       if (!research.alternatives && !research.reusableAlternatives && !research.packagingAlternatives) {
         console.error('TerraCart: No research data in response')
-        setResearchError('Gemini returned an unexpected response. The research feature may be temporarily unavailable.')
+        setResearchError('Research returned an unexpected response. Please try again.')
         setResearchState('error')
         return
       }
@@ -1329,7 +1278,7 @@ function AlternativesTab({
             },
             reason: alt.reason || '',
             improvementAreas: (alt.characteristics || []).slice(0, 3),
-            scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+            scoreComparison: { original: 0, alternative: alt.ecoRelevanceScore ? alt.ecoRelevanceScore / 10 : 0 },
             type: 'similar',
             priority: 'high',
           })
@@ -1363,7 +1312,7 @@ function AlternativesTab({
             },
             reason: alt.reason || '',
             improvementAreas: (alt.characteristics || []).slice(0, 3),
-            scoreComparison: { original: 0, alternative: alt.ecoScore || 0 },
+            scoreComparison: { original: 0, alternative: alt.ecoRelevanceScore ? alt.ecoRelevanceScore / 10 : 0 },
             type: 'reusable',
             priority: 'high',
           })
@@ -1407,6 +1356,7 @@ function AlternativesTab({
         researchCache.current.set(cacheKey, { alternatives: alts, sources: allSources })
         setWebAlternatives(alts)
         setResearchSources(allSources)
+        console.log('[TerraCart] Updating alternatives UI:', alts.length)
         setProductAnalysis({
           ...(currentProductAnalysis || analysis),
           alternatives: alts,
@@ -1414,14 +1364,14 @@ function AlternativesTab({
         console.log('TerraCart: Updated webAlternatives, total count:', alts.length)
         
         if (alts.length === 0) {
-          setResearchError('Research completed but no verified alternatives were found for this product.')
-          setResearchState('error')
+          setResearchError(result.reason || 'No meaningful eco-friendly alternatives were found for this product.')
+          setResearchState('no_results')
         } else {
-          setResearchState('done')
+          setResearchState('success')
         }
     } catch (err: any) {
-      console.error('TerraCart: handleDeepResearch exception:', err)
-      setResearchError('Research failed: ' + (err?.message || String(err)))
+      console.error('[TerraCart] Research FAILED:', err)
+      setResearchError(`Research failed. ${err?.message || String(err)}`)
       setResearchState('error')
     } finally {
       console.log('TerraCart: Research complete, cleaning up')
@@ -1474,10 +1424,16 @@ function AlternativesTab({
       {researchState === 'error' && (
         <div className="terra-card p-4 border-amber-200 bg-amber-50">
           <p className="text-xs text-amber-700">
-            {researchError?.includes('GEMINI_API_KEY_MISSING') || researchError?.includes('GEMINI_API_KEY_INVALID')
-              ? 'Gemini API key not configured. Please set up in Settings.'
-              : 'Research temporarily unavailable. ' + (researchError || 'Unknown error')}
+            {'Research temporarily unavailable. ' + (researchError || 'Unknown error')}
           </p>
+        </div>
+      )}
+
+      {researchState === 'no_results' && (
+        <div className="terra-card p-4 border-green-200 bg-green-50">
+          <div className="text-sm font-semibold text-green-800">🌱 No meaningful eco-friendly alternative found</div>
+          <p className="text-xs text-green-700 mt-2">TerraCart researched this product and could not identify a compatible alternative with a sufficiently strong sustainability advantage.</p>
+          {researchError && <p className="text-xs text-green-700 mt-2">{researchError}</p>}
         </div>
       )}
 
@@ -1595,7 +1551,7 @@ function PackagingDecision({ question, answer, detail }: { question: string; ans
 }
 
 // ============================================================
-// Settings Panel — includes Gemini API key management
+// Settings Panel
 // ============================================================
 function SettingsPanel({ onBack }: { onBack: () => void }) {
   const { preferences, updatePreferences, setRecommendationStyle, clearAllData } = useTerraStore()
@@ -1633,7 +1589,7 @@ function SettingsPanel({ onBack }: { onBack: () => void }) {
         <div className="terra-card p-4 border-terra-200">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-xs font-medium text-gray-700">🤖 Gemini AI — powered & ready</span>
+            <span className="text-xs font-medium text-gray-700">🔎 Web research runs through TerraCart</span>
           </div>
         </div>
 
@@ -1853,13 +1809,13 @@ function HistoryPanel({ onBack, onAnalyze }: { onBack: () => void; onAnalyze: (p
 // Empty / Loading / Disabled States
 // ============================================================
 function ShoppingNoProductState({
-  retailer, pageType, onScan, showGeminiPrompt, onSetupGemini, isAnalyzing,
+  retailer, pageType, onScan, showResearchPrompt, onSetupResearch, isAnalyzing,
 }: {
   retailer: string
   pageType: string | null
   onScan: () => void
-  showGeminiPrompt?: boolean
-  onSetupGemini?: () => void
+  showResearchPrompt?: boolean
+  onSetupResearch?: () => void
   isAnalyzing?: boolean
 }) {
   const prettyPage =
@@ -1892,19 +1848,19 @@ function ShoppingNoProductState({
       <button onClick={onScan} className="terra-btn-primary text-sm mb-3">
         🔄 Rescan Page
       </button>
-      {showGeminiPrompt && onSetupGemini && (
-        <button onClick={onSetupGemini} className="terra-btn-outline text-xs text-amber-600">
-          🤖 Set up AI Research (Gemini)
+      {showResearchPrompt && onSetupResearch && (
+        <button onClick={onSetupResearch} className="terra-btn-outline text-xs text-amber-600">
+          🔎 Set up web research
         </button>
       )}
     </div>
   )
 }
 
-function EmptyState({ onScan, showGeminiPrompt, onSetupGemini }: { onScan: () => void; showGeminiPrompt?: boolean; onSetupGemini?: () => void }) {
+function EmptyState({ onScan, showResearchPrompt, onSetupResearch }: { onScan: () => void; showResearchPrompt?: boolean; onSetupResearch?: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-      <img src="/icons/icon128.png" alt="TerraCart" className="w-20 h-20 mb-4" />
+      <img src="/icons/icon128.png?v=20260825" alt="TerraCart" className="w-20 h-20 mb-4" />
       <h2 className="text-lg font-bold text-gray-800 mb-2">Welcome to TerraCart</h2>
       <p className="text-sm text-gray-500 leading-relaxed mb-4">
         Your AI Copilot for Smarter Shopping. Visit a shopping website and TerraCart will analyze products automatically.
@@ -1915,9 +1871,9 @@ function EmptyState({ onScan, showGeminiPrompt, onSetupGemini }: { onScan: () =>
       <button onClick={onScan} className="terra-btn-primary text-sm mb-3">
         🔄 Scan Current Page
       </button>
-      {showGeminiPrompt && onSetupGemini && (
-        <button onClick={onSetupGemini} className="terra-btn-outline text-xs text-amber-600">
-          🤖 Set up AI Research (Gemini)
+      {showResearchPrompt && onSetupResearch && (
+        <button onClick={onSetupResearch} className="terra-btn-outline text-xs text-amber-600">
+          🔎 Set up web research
         </button>
       )}
     </div>
@@ -1927,7 +1883,7 @@ function EmptyState({ onScan, showGeminiPrompt, onSetupGemini }: { onScan: () =>
 function AnalyzingState() {
   return (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-      <div className="text-4xl mb-4 animate-pulse-soft">🌍</div>
+      <img src="/assets/terracart-logo.png?v=20260826" alt="TerraCart" className="w-20 h-20 mb-4 object-contain mx-auto" />
       <h2 className="text-sm font-bold text-gray-800 mb-2">TerraCart is researching...</h2>
       <div className="space-y-1.5 text-xs text-gray-500">
         <div className="flex items-center gap-2 justify-center"><span className="text-terra-500">✓</span> Understanding the product</div>

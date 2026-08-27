@@ -91,6 +91,8 @@ export interface EcoScore {
   sources: ResearchSource[]
   aiGenerated: boolean
   disclaimer: string
+  confidenceScore?: number
+  informationQuality?: 'high' | 'medium' | 'low'
 }
 
 // ---- AI Verdict ----

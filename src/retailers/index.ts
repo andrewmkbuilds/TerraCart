@@ -10,7 +10,6 @@ import {
   isHardBlockedHost,
   isKnownShoppingHost,
   isEcommerceSite,
-  evaluateSiteGate,
   looksLikeProductUrl,
 } from './site-gate'
 
@@ -141,4 +140,4 @@ export function isShoppingSite(url: string): boolean {
 
 export type { RetailerAdapter }
 export { ECommerceDetection, isProductPage }
-export { isHardBlockedHost, isEcommerceSite, evaluateSiteGate } from './site-gate'
+export { isHardBlockedHost, isEcommerceSite } from './site-gate'
