@@ -28,7 +28,7 @@ function sendMessageToBackground(message: Record<string, unknown>): Promise<any>
 }
 
 // ============================================================
-// processUserMessage — sends real request to Gemini via background
+// processUserMessage — provides local guidance without inventing web results
 // ============================================================
 export async function processUserMessage(message: string): Promise<ChatResponse> {
   const store = useTerraStore.getState()
@@ -42,49 +42,11 @@ export async function processUserMessage(message: string): Promise<ChatResponse>
     content: msg.content,
   }))
 
-  // Check if Gemini API key is configured
-  const apiKeyStatus = await sendMessageToBackground({ type: 'GET_API_KEY' })
-
-  if (!apiKeyStatus?.configured) {
-    // No API key — provide helpful local fallback
-    return getLocalFallback(message, currentProduct, store)
-  }
-
-  // Send real request to Gemini through background
-  try {
-    const result = await sendMessageToBackground({
-      type: 'GEMINI_CHAT',
-      message,
-      product: currentProduct,
-      preferences,
-      chatHistory,
-    })
-
-    if (result?.content) {
-      return {
-        content: result.content,
-        metadata: {
-          productId: currentProduct?.id,
-          type: 'gemini-chat',
-          sources: result.sources || [],
-        },
-      }
-    }
-
-    return {
-      content: "I received an empty response. Please try again.",
-      metadata: { productId: currentProduct?.id },
-    }
-  } catch (err) {
-    return {
-      content: "I couldn't reach the AI service. Please check your internet connection and try again.",
-      metadata: { productId: currentProduct?.id },
-    }
-  }
+  return getLocalFallback(message, currentProduct, store)
 }
 
 // ============================================================
-// Local fallback when Gemini API is not configured
+// Local responses never claim to be web research results.
 // ============================================================
 function getLocalFallback(
   message: string,
@@ -93,19 +55,15 @@ function getLocalFallback(
 ): ChatResponse {
   const lowerMessage = message.toLowerCase()
 
-  if (lowerMessage.includes('api key') || lowerMessage.includes('gemini') || lowerMessage.includes('setup') || lowerMessage.includes('configure')) {
+  if (lowerMessage.includes('api key') || lowerMessage.includes('setup') || lowerMessage.includes('configure')) {
     return {
       content: [
-        '⚙️ **Gemini AI Setup Required**',
+        '⚙️ **Web research runs through TerraCart**',
         '',
-        'TerraCart uses Google Gemini AI for real product research and web search.',
+        'Tavily web research is available from the Alternatives tab.',
         '',
         'To enable full AI functionality:',
-        '1. Get a free API key from Google AI Studio (aistudio.google.com)',
-        '2. Open TerraCart Settings (⚙️ in the header)',
-        '3. Paste your API key',
-        '',
-        'Without an API key, I can still provide basic local analysis, but I cannot search the web for alternatives.',
+        'Start the research action there to search for source-backed alternatives.',
       ].join('\n'),
     }
   }
@@ -113,16 +71,16 @@ function getLocalFallback(
   if (!product) {
     return {
       content: [
-        "I'm ready to help you shop smarter! 🌍",
+        "I'm ready to help you shop smarter!",
         '',
         'Visit a shopping website like Amazon, Noon, or Walmart, and TerraCart will analyze products automatically.',
         '',
-        'For full AI-powered research with web search, please configure your Gemini API key in Settings.',
+        'Open a supported shopping product to start source-backed web research.',
       ].join('\n'),
     }
   }
 
-  // Provide basic local analysis without Gemini
+  // Provide basic local analysis without web claims
   if (lowerMessage.includes('should i buy') || lowerMessage.includes('worth it') || lowerMessage.includes('worth buying')) {
     const analysis = store.currentProductAnalysis
     if (analysis) {
@@ -134,7 +92,7 @@ function getLocalFallback(
           '',
           'Eco Score: **' + analysis.ecoScore.overall + '/10** (' + analysis.ecoScore.confidence + ' confidence)',
           '',
-          '_For deeper AI analysis with web research, configure your Gemini API key in Settings._',
+          '_Use the Alternatives tab for source-backed web research._',
         ].join('\n'),
         metadata: { productId: product.id },
       }
@@ -143,9 +101,9 @@ function getLocalFallback(
       content: [
         'I detected **' + product.name + '**.',
         '',
-        'Basic local analysis is available, but for full AI-powered research, please configure your Gemini API key in Settings.',
+        'Basic local analysis is available. Use the Alternatives tab for web research.',
         '',
-        'To set up: Click ⚙️ in the header → Add your Google AI API key.',
+        'To research alternatives, open the Alternatives tab.',
       ].join('\n'),
       metadata: { productId: product.id },
     }
@@ -154,14 +112,12 @@ function getLocalFallback(
   if (lowerMessage.includes('alternative') || lowerMessage.includes('reusable') || lowerMessage.includes('better option')) {
     return {
       content: [
-        '🔍 **Web Research Requires Gemini AI**',
+        '🔍 **Use the Alternatives tab for web research**',
         '',
-        'Finding real alternatives requires web search, which needs a Gemini API key.',
+        'Finding real alternatives requires the Tavily-backed research action.',
         '',
         'To find real alternatives:',
-        '1. Get a free API key from Google AI Studio',
-        '2. Open Settings (⚙️) and add your key',
-        '3. Then ask me again',
+        'Open Alternatives and choose the research type you need.',
         '',
         'I found the product **' + product.name + '** on ' + product.retailer + '.',
       ].join('\n'),
@@ -182,16 +138,16 @@ function getLocalFallback(
       '• Web search for better options',
       '• Personalized recommendations',
       '',
-      'Please configure your Gemini API key in Settings (⚙️).',
+      'Open the Alternatives tab to run source-backed web research.',
       '',
-      'It\'s free from Google AI Studio (aistudio.google.com).',
+      'Research results include the original source URL.',
     ].join('\n'),
     metadata: { productId: product.id },
   }
 }
 
 // ============================================================
-// researchAlternatives — trigger Gemini research via background
+// researchAlternatives — trigger Tavily research via the background proxy
 // ============================================================
 export async function researchAlternatives(
   product: Product,
@@ -203,19 +159,9 @@ export async function researchAlternatives(
   searchQueries: string[]
   error?: string
 }> {
-  const apiKeyStatus = await sendMessageToBackground({ type: 'GET_API_KEY' })
-  if (!apiKeyStatus?.configured) {
-    return {
-      research: null,
-      sources: [],
-      searchQueries: [],
-      error: 'GEMINI_API_KEY_MISSING',
-    }
-  }
-
   try {
     const result = await sendMessageToBackground({
-      type: 'GEMINI_RESEARCH',
+      type: 'TAVILY_RESEARCH',
       product,
       preferences,
       researchType,

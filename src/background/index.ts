@@ -335,37 +335,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         setTimeout(() => safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle }), 8000)
 
-        // Try content script (already injected)
-        chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (result) => {
-          if (!responded && !chrome.runtime.lastError && result) {
-            // Store result in cache
-            if (result.type !== 'other' || result.primaryProduct) {
-              tabScanData.set(tabId, { ...result, timestamp: Date.now() })
-            }
-            safeRespond(result)
-          } else if (!responded && !contentScriptLoadedTabs.has(tabId)) {
-            // Content script not loaded — inject it then wait for it to initialize
-            chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }).then(() => {
-              // Give the content script 2s to call init() and set up listeners
-              setTimeout(() => {
-                chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (retryResult) => {
-                  if (!responded && !chrome.runtime.lastError && retryResult) {
-                    if (retryResult.type !== 'other' || retryResult.primaryProduct) {
-                      tabScanData.set(tabId, { ...retryResult, timestamp: Date.now() })
+        // Try content script (already injected by manifest).
+        // On a fresh page load the manifest-injected script may not have
+        // initialized its listeners yet, so retry once before falling back
+        // to programmatic injection to avoid double-loading content.js.
+        const attemptScan = (attempt: number) => {
+          chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (result) => {
+            if (!responded && !chrome.runtime.lastError && result) {
+              if (result.type !== 'other' || result.primaryProduct) {
+                tabScanData.set(tabId, { ...result, timestamp: Date.now() })
+              }
+              safeRespond(result)
+            } else if (!responded && !contentScriptLoadedTabs.has(tabId) && attempt === 0) {
+              setTimeout(() => attemptScan(1), 400)
+            } else if (!responded && !contentScriptLoadedTabs.has(tabId)) {
+              chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }).then(() => {
+                setTimeout(() => {
+                  chrome.tabs.sendMessage(tabId, { type: 'SCAN_PAGE' }, (retryResult) => {
+                    if (!responded && !chrome.runtime.lastError && retryResult) {
+                      if (retryResult.type !== 'other' || retryResult.primaryProduct) {
+                        tabScanData.set(tabId, { ...retryResult, timestamp: Date.now() })
+                      }
+                      safeRespond(retryResult)
+                    } else if (!responded) {
+                      safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
                     }
-                    safeRespond(retryResult)
-                  } else if (!responded) {
-                    safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
-                  }
-                })
-              }, 2000)
-            }).catch(() => {
+                  })
+                }, 2000)
+              }).catch(() => {
+                safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
+              })
+            } else if (!responded) {
               safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
-            })
-          } else if (!responded) {
-            safeRespond({ ...emptyResult(), retailer: hostname, pageTitle: tabTitle })
-          }
-        })
+            }
+          })
+        }
+        attemptScan(0)
       })
       return true
     }
