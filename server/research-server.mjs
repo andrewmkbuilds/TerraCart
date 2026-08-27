@@ -3,7 +3,7 @@ import { tavily } from '@tavily/core'
 
 const port = Number(process.env.PORT || 8787)
 const allowedOrigins = (process.env.TERRACART_EXTENSION_ORIGINS || '').split(',').map(origin => origin.trim()).filter(Boolean)
-const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
 const categoryTerms = {
   electronics: ['phone', 'smartphone', 'laptop', 'tablet', 'computer', 'device', 'electronics', 'battery'],
   clothing: ['shirt', 'clothing', 'dress', 'jeans', 'jacket', 'shoes', 'apparel', 'fashion'],

@@ -1,6 +1,6 @@
 import { tavily } from '@tavily/core'
 
-const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash'
 
 function analysisProductPayload(product) {
   return {
