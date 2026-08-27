@@ -12,6 +12,8 @@
     "tabs"
   ],
   "host_permissions": [
+    "https://tc-api-gray.vercel.app/*",
+    "https://*.vercel.app/*",
     "http://localhost:8787/*",
     "http://*/*",
     "https://*/*"
@@ -75,6 +77,6 @@
     "256": "icons/icon256.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src http://localhost:8787; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https://tc-api-gray.vercel.app https://*.vercel.app http://localhost:8787; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com"
   }
 }

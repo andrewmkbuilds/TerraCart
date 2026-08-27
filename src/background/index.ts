@@ -7,9 +7,9 @@
 
 import type { Product } from '../types'
 
-const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-const RESEARCH_BACKEND_URL = API_BASE ? `${API_BASE}/api/research` : 'http://localhost:8787/api/research'
-const ANALYSIS_BACKEND_URL = API_BASE ? `${API_BASE}/api/analyze` : 'http://localhost:8787/api/analyze'
+const API_BASE = (import.meta.env.VITE_API_URL || 'https://tc-api-gray.vercel.app').replace(/\/$/, '')
+const RESEARCH_BACKEND_URL = `${API_BASE}/api/research`
+const ANALYSIS_BACKEND_URL = `${API_BASE}/api/analyze`
 
 async function runGeminiAnalysis(product: Product | null) {
   if (!product || !product.name || !product.url || !product.retailer) {
