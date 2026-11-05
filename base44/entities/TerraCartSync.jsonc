@@ -1,0 +1,17 @@
+{
+  "name": "TerraCartSync",
+  "type": "object",
+  "properties": {
+    "payload": {
+      "type": "string",
+      "description": "JSON snapshot of the user's TerraCart data (checklist, saved products, TerraPoints, preferences, reminders)"
+    },
+    "updated_at": {
+      "type": "number",
+      "description": "When the snapshot was written"
+    }
+  },
+  "required": [
+    "payload"
+  ]
+}

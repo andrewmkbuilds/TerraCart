@@ -564,3 +564,24 @@ export function scoreInsights(
 
   return insights.slice(0, 4)
 }
+
+/** Material words present in a block of page text — used by the detector. */
+export function findMaterialLabels(text: string): string[] {
+  const haystack = text.toLowerCase().replace(/\s+/g, ' ')
+  return matchRules(haystack, MATERIAL_RULES).map((rule) => rule.label)
+}
+
+/** Certification names present in a block of page text. */
+export function findCertificationLabels(text: string): string[] {
+  const haystack = text.toLowerCase().replace(/\s+/g, ' ')
+  return CERTIFICATION_RULES.filter((rule) => rule.pattern.test(haystack)).map((rule) => rule.label)
+}
+
+/** Plastic packaging signals found in page text. */
+export function findPackagingSignals(text: string): { plastic: string[]; plasticFree: string[] } {
+  const haystack = text.toLowerCase().replace(/\s+/g, ' ')
+  return {
+    plastic: matchRules(haystack, PLASTIC_PACKAGING_RULES).map((rule) => rule.label),
+    plasticFree: matchRules(haystack, PLASTIC_FREE_PACKAGING_RULES).map((rule) => rule.label),
+  }
+}
