@@ -3,7 +3,7 @@ import { Sparkles } from 'lucide-react'
 import type { PopupData } from '../../hooks/usePopupData'
 import type { AlternativeSuggestion } from '../../types'
 import ViewHeader from '../components/ViewHeader'
-import AlternativeCard from '../components/AlternativeCard'
+import AlternativeCard from '../../components/analysis/AlternativeCard'
 import {
   ALTERNATIVES_DISCLAIMER,
   PLASTIC_FREE_CATEGORIES,
