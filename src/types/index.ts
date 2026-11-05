@@ -1,350 +1,306 @@
 // ============================================================
-// TerraCart Core Data Models
+// TerraCart — shared domain types
 // ============================================================
 
-// ---- Product ----
-export interface Product {
+export type EvidenceKind = 'verified' | 'inferred' | 'unknown'
+export type Confidence = 'high' | 'medium' | 'low'
+
+export type ScoreCategoryKey =
+  | 'materials'
+  | 'packaging'
+  | 'durability'
+  | 'circularity'
+  | 'certifications'
+  | 'sourcing'
+
+export type Classification = 'excellent' | 'good' | 'moderate' | 'poor' | 'very-poor' | 'unknown'
+
+export type DetectionSource =
+  | 'json-ld'
+  | 'microdata'
+  | 'opengraph'
+  | 'adapter'
+  | 'heuristic'
+  | 'manual'
+
+export interface ProductDetectionMeta {
+  source: DetectionSource
+  adapter: string | null
+  confidence: number // 0-100, completeness of detected fields
+  missing: string[]
+}
+
+export interface DetectedProduct {
   id: string
   name: string
-  category: ProductCategory
-  price: number
-  currency: string
-  image: string
-  images?: string[]
-  description: string
-  materials: string[]
-  durability?: 'low' | 'medium' | 'high'
-  reusability?: 'single-use' | 'limited' | 'reusable' | 'highly-reusable'
-  repairability?: 'not-repairable' | 'limited' | 'repairable' | 'highly-repairable'
-  packaging: PackagingInfo
-  retailer: string
-  rating: number
-  reviewCount: number
-  availability: 'in-stock' | 'out-of-stock' | 'limited' | 'unknown'
-  url: string
   brand?: string
-  size?: string
-  weight?: string
-  certifications?: string[]
-  sustainabilityClaims?: string[]
-  features?: string[]
-  alternatives?: string[] // IDs of alternative products
-  seller?: string
-  shippingInfo?: string
-  warranty?: string
-  categorySpecific?: Record<string, any>
-}
-
-export type ProductCategory =
-  | 'electronics'
-  | 'clothing'
-  | 'food'
-  | 'school-supplies'
-  | 'home'
-  | 'cleaning'
-  | 'personal-care'
-  | 'travel'
-  | 'kitchen'
-  | 'beverages'
-  | 'office'
-  | 'fitness'
-  | 'other'
-
-// ---- Packaging ----
-export interface PackagingInfo {
-  type: PackagingType[]
-  estimatedWeight: 'minimal' | 'light' | 'moderate' | 'heavy'
-  recyclable: boolean | 'unknown'
-  recyclableDetails?: string
+  price?: number
+  currency?: string
+  image?: string
   description?: string
-  layers?: number
-  containsPlastic: boolean | 'unknown'
-  refillable: boolean | 'unknown'
-  bulkAvailable?: boolean
+  category: string
+  url: string
+  hostname: string
+  retailer: string
+  materials: string[]
+  packaging?: string
+  certifications: string[]
+  features: string[]
+  specs: Record<string, string>
+  detection: ProductDetectionMeta
+  detectedAt: number
 }
 
-export type PackagingType =
-  | 'cardboard'
-  | 'paper'
-  | 'plastic-wrap'
-  | 'plastic-container'
-  | 'plastic-bag'
-  | 'glass'
-  | 'metal'
-  | 'compostable'
-  | 'none'
-  | 'mixed'
-  | 'unknown'
-
-// ---- Eco Score ----
-export interface EcoScore {
-  overall: number // 0-10
-  breakdown: {
-    reusability: number // 0-10
-    durability: number // 0-10
-    packaging: number // 0-10
-    repairability: number // 0-10
-    materialConsiderations: number // 0-10
-  }
-  confidence: 'high' | 'medium' | 'low'
-  reasoning: string[]
-  sources: ResearchSource[]
-  aiGenerated: boolean
-  disclaimer: string
-  confidenceScore?: number
-  informationQuality?: 'high' | 'medium' | 'low'
-}
-
-// ---- AI Verdict ----
-export interface AIVerdict {
-  level: 'great-choice' | 'good-choice' | 'consider-alternatives' | 'limited-info'
+export interface ScoreCategoryResult {
+  key: ScoreCategoryKey
   label: string
-  emoji: string
-  explanation: string
-  confidence: 'high' | 'medium' | 'low'
-  factors?: string[]
+  weight: number
+  /** 0-100, or null when there is no evidence for this category. */
+  score: number | null
+  evidenceKind: EvidenceKind
+  note: string
+  evidence: string[]
 }
 
-// ---- Alternative ----
-export interface Alternative {
-  productId: string
-  product?: Product
+export interface TerraScore {
+  /** null when no category could be scored — never faked. */
+  overall: number | null
+  classification: Classification
+  confidence: Confidence
+  /** Share of the total weight backed by evidence, 0-100. */
+  coverage: number
+  categories: ScoreCategoryResult[]
+  positives: string[]
+  concerns: string[]
+  unknowns: string[]
+  unverifiedClaims: string[]
+}
+
+export interface PlasticSignal {
+  status: 'plastic-free' | 'contains-plastic' | 'unknown'
+  kind: EvidenceKind
+  evidence: string[]
+}
+
+export interface PlasticAssessment {
+  product: PlasticSignal
+  packaging: PlasticSignal
+  confidence: Confidence
+}
+
+export interface AlternativeSuggestion {
+  id: string
+  title: string
+  material: string
+  category: string
   reason: string
-  improvementAreas: string[]
-  scoreComparison: {
-    original: number
-    alternative: number
-  }
-  priceComparison?: {
-    original: number
-    alternative: number
-    currency: string
-  }
-  type: 'reusable' | 'refillable' | 'durable' | 'minimal-packaging' | 'better-materials' | 'longer-lasting' | 'similar'
-  priority: 'high' | 'medium' | 'low'
-  productUrl?: string
-  sourceUrl?: string
+  reusable: boolean
+  plasticFree: boolean
+  /** TerraScore the material profile would typically reach, used for sorting only. */
+  materialScore: number
+  searchQuery: string
+  searchUrl: string
+  sourceLabel: string
 }
 
-// ---- Research ----
-export interface ResearchSource {
-  name: string
-  url?: string
-  type: 'verified' | 'ai-inference' | 'estimated' | 'manufacturer' | 'retailer' | 'independent'
-  reliability: 'high' | 'medium' | 'low'
+export interface ProductAnalysis {
+  product: DetectedProduct
+  score: TerraScore
+  plastic: PlasticAssessment
+  alternatives: AlternativeSuggestion[]
+  insights: string[]
+  disclaimer: string
+  analysedAt: number
 }
 
-export interface ResearchResult {
-  query: string
-  sources: ResearchSource[]
-  findings: string[]
-  confidence: 'high' | 'medium' | 'low'
-  timestamp: number
-}
-
-export interface ResearchStep {
-  label: string
-  status: 'pending' | 'in-progress' | 'complete' | 'error'
-  detail?: string
-}
+export type AlternativeFilter =
+  | 'highest-score'
+  | 'most-reusable'
+  | 'plastic-free'
+  | 'best-value'
 
 // ---- Checklist ----
 export interface ChecklistItem {
   id: string
-  text: string
-  category: ChecklistCategory
-  checked: boolean
-  dynamic: boolean
+  name: string
+  category: string
+  quantity: number
+  note: string
+  purchased: boolean
+  url?: string
+  image?: string
+  price?: number
+  currency?: string
+  score: number | null
+  reusable: boolean
+  plasticPackaging: boolean | 'unknown'
+  hasEnvironmentalInfo: boolean
+  addedAt: number
+  purchasedAt?: number
 }
 
-export type ChecklistCategory =
-  | 'general'
-  | 'before-you-buy'
-  | 'electronics'
-  | 'clothing'
-  | 'food'
-  | 'school-supplies'
-  | 'cleaning'
-  | 'home'
-  | 'personal-care'
-
-// ---- User Preferences ----
-export interface UserPreferences {
-  sustainabilityPriorities: SustainabilityPriority[]
-  recommendationStyle: RecommendationStyle
-  budgetRange?: { min: number; max: number }
-  preferredBrands: string[]
-  preferredRetailers: string[]
-  sizePreferences: string[]
-  notificationsEnabled: boolean
-  pauseOnWebsite?: string[]
-  enableFloatingButton: boolean
-  enableAutoOpenPanel: boolean
-  autoOpenDelay: number // seconds before auto-open (0 = instant)
-  autoOpenNotification: boolean // show notification when panel auto-opens
-  autoOpenProductPagesOnly: boolean // only auto-open on product pages (not search/category)
-  chimeVolume: 'off' | 'soft' | 'loud' // auto-open chime sound volume
-  enableHistory: boolean
-  enablePatternDetection: boolean
-  reducedMotion: boolean
+export interface ChecklistSummary {
+  count: number
+  averageScore: number | null
+  reusableCount: number
+  plasticPackagingCount: number
+  missingInfoCount: number
 }
 
-export type SustainabilityPriority =
-  | 'reduce-plastic'
-  | 'reduce-packaging'
-  | 'buy-reusable'
-  | 'buy-durable'
-  | 'prefer-repairable'
-  | 'reduce-unnecessary-purchases'
-  | 'prefer-refillable'
-  | 'prefer-recyclable-packaging'
-  | 'lower-carbon-footprint'
-  | 'ethical-sourcing'
-
-export type RecommendationStyle =
-  | 'most-sustainable'
-  | 'best-value'
-  | 'balanced'
-  | 'lowest-price'
-  | 'longest-lasting'
-
-// ---- Shopping History ----
-export interface HistoryEntry {
+// ---- Reminders ----
+export interface Reminder {
   id: string
-  productId: string
-  product: Partial<Product>
-  timestamp: number
-  action: 'viewed' | 'analyzed' | 'saved' | 'compared' | 'recommended'
-  ecoScore?: number
-  category: ProductCategory
+  label: string
+  enabled: boolean
+  time: string // "HH:MM", 24h
+  days: number[] // 0 = Sunday … 6 = Saturday
+  custom: boolean
+  lastNotified?: number
 }
 
-export interface ShoppingPattern {
-  category: ProductCategory
-  frequency: number
-  lastSeen: number
-  products: string[] // product IDs
-  type: 'disposable-repeated' | 'durable-repeated' | 'category-frequent'
-  suggestion?: string
-}
+// ---- Points / gamification ----
+export type PointAction =
+  | 'analyse-product'
+  | 'save-product'
+  | 'add-reusable-item'
+  | 'open-alternative'
+  | 'plastic-free-purchase'
+  | 'challenge-complete'
 
-// ---- Saved Products ----
-export interface SavedProduct {
+export interface PointsEvent {
   id: string
-  product: Product
-  savedAt: number
-  ecoScore?: number
-  notes?: string
-  tags?: string[]
-}
-
-// ---- Analysis ----
-export interface ProductAnalysis {
-  productId: string
-  product: Product
-  ecoScore: EcoScore
-  verdict: AIVerdict
-  alternatives: Alternative[]
-  checklist: ChecklistItem[]
-  packagingAnalysis: PackagingAnalysis
-  greenwashingDetection?: GreenwashingAlert
-  researchSteps: ResearchStep[]
-  confidence: 'high' | 'medium' | 'low'
-  timestamp: number
-  personalizedInsight?: string
-}
-
-export interface PackagingAnalysis {
-  currentPackaging: PackagingInfo
-  packagingScore: number // 0-10
-  issues: string[]
-  improvements: PackagingImprovement[]
-  lessPackagingAlternative?: { description: string; url?: string }
-}
-
-export interface PackagingImprovement {
-  type: 'refill' | 'bulk' | 'less-packaging' | 'reusable-container' | 'consolidated-shipping' | 'package-free'
-  available: boolean
-  description: string
-  source?: string
-}
-
-export interface GreenwashingAlert {
-  detected: boolean
-  claims: string[]
-  warning: string
-  confidence: 'high' | 'medium' | 'low'
-}
-
-// ---- Comparison ----
-export interface ProductComparison {
-  products: Product[]
-  scores: EcoScore[]
-  verdicts: AIVerdict[]
-  rankings: ProductRanking[]
-  recommendation: string
-}
-
-export interface ProductRanking {
-  productId: string
-  rank: number
-  ecoScore: number
-  label: string // "Best overall", "Best value", "Lower price"
-  reason: string
-}
-
-// ---- Impulse Detection ----
-export interface ImpulseCheck {
-  message: string
-  productCategory: ProductCategory
-  relatedToCurrentBrowsing: boolean
-  userResponse?: 'need-it' | 'just-browsing' | 'remind-later'
-}
-
-// ---- Page Scan Result ----
-export interface PageScanResult {
-  type: 'product-page' | 'search-results' | 'category-page' | 'cart-page' | 'other'
-  products: Product[]
-  primaryProduct?: Product
-  searchQuery?: string
-  retailer: string
-  pageTitle: string
+  action: PointAction | 'achievement'
+  label: string
+  points: number
   timestamp: number
 }
 
-// ---- Message Types (Chrome Extension Messaging) ----
-export interface ExtensionMessage {
-  type: string
-  payload: any
-  tabId?: number
-  timestamp: number
-}
-
-// ---- Recommendations ----
-export interface RecommendationResult {
-  type: 'reusable-alternative' | 'better-packaging' | 'durability' | 'pattern-warning' | 'impulse-check' | 'price-vs-sustainability' | 'long-term-value' | 'do-i-own-this' | 'purchase-timing'
+export interface Achievement {
+  id: string
   title: string
   description: string
-  products?: Product[]
-  product?: Product
-  reason: string
-  priority: 'high' | 'medium' | 'low'
-  dismissed?: boolean
+  icon: string
+  unlockedAt?: number
 }
 
-// ---- Learning Loop ----
-export interface UserInteraction {
-  type: 'accepted-recommendation' | 'dismissed-recommendation' | 'chose-price-over-sustainability' | 'chose-sustainability-over-price' | 'asked-for-alternative' | 'saved-product' | 'used-checklist'
-  timestamp: number
-  productId?: string
-  recommendationId?: string
-  metadata?: Record<string, any>
+export interface Challenge {
+  id: string
+  label: string
+  target: number
+  progress: number
+  reward: number
+  claimed: boolean
 }
 
-export interface PreferenceUpdate {
-  timestamp: number
-  message: string
-  previousValue: any
-  newValue: any
-  reason: string
+export interface ChallengeWeek {
+  weekId: string
+  items: Challenge[]
+}
+
+export interface PointsState {
+  points: number
+  events: PointsEvent[]
+  achievements: Record<string, number> // achievement id → unlocked timestamp
+  challengeWeek: ChallengeWeek
+  streak: {
+    current: number
+    longest: number
+    lastActiveDate: string | null
+  }
+  counters: {
+    analyses: number
+    reusableItemsAdded: number
+    plasticFreePurchases: number
+    alternativesOpened: number
+    featuresUsed: string[]
+    dailyAnalyses: Record<string, string[]> // yyyy-mm-dd → product ids
+    awardedKeys: Record<string, number>
+  }
+}
+
+export interface LevelInfo {
+  level: number
+  name: string
+  min: number
+  next: number | null
+  progress: number
+}
+
+// ---- Preferences ----
+export type PriorityKey =
+  | 'plastic-reduction'
+  | 'reusability'
+  | 'recyclability'
+  | 'durability'
+  | 'ethical-sourcing'
+  | 'low-impact'
+
+export interface Preferences {
+  priorities: PriorityKey[]
+  preferredCategories: string[]
+  notificationsEnabled: boolean
+  floatingLauncher: boolean
+  reduceMotion: boolean
+  compactMode: boolean
+  saveHistory: boolean
+  cloudSync: boolean
+  onboarded: boolean
+}
+
+// ---- History ----
+export interface AnalysisRecord {
+  id: string
+  productId: string
+  name: string
+  brand?: string
+  image?: string
+  price?: number
+  currency?: string
+  hostname: string
+  url: string
+  score: number | null
+  classification: Classification
+  analysedAt: number
+}
+
+export interface SavedProduct {
+  id: string
+  productId: string
+  name: string
+  brand?: string
+  image?: string
+  url: string
+  hostname: string
+  score: number | null
+  savedAt: number
+}
+
+// ---- Tab context passed between content script, background and popup ----
+export interface TabContext {
+  tabId: number | null
+  url: string
+  hostname: string
+  title: string
+  supported: boolean
+  analysis: ProductAnalysis | null
+  detectedAt?: number
+}
+
+// ---- Base44 sync ----
+export type SyncStatus = 'unconfigured' | 'signed-out' | 'connected' | 'error'
+
+export interface SyncSnapshot {
+  checklist: ChecklistItem[]
+  saved: SavedProduct[]
+  points: PointsState
+  preferences: Preferences
+  reminders: Reminder[]
+  updatedAt: number
+}
+
+export interface SyncState {
+  status: SyncStatus
+  email?: string
+  lastSyncedAt?: number
+  message?: string
 }
