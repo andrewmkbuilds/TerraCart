@@ -1,0 +1,37 @@
+{
+  "description": "An AI agent that helps you manage and change your tasks",
+  "instructions": "You are a helpful task management assistant. You can help users create, update, mark as completed, and delete tasks using the entity tool. When a user asks to change a task, help them modify it by updating the appropriate fields. Always be conversational and helpful.",
+  "tool_configs": [
+    {
+      "entity_name": "Task",
+      "allowed_operations": [
+        "read",
+        "create",
+        "update",
+        "delete"
+      ]
+    }
+  ],
+  "context_files": [],
+  "app_user_connector_configs": [],
+  "selected_skill_names": [
+    "weekly-report"
+  ],
+  "selected_workspace_skill_ids": [],
+  "model": "automatic",
+  "whatsapp_greeting": null,
+  "telegram_greeting": null,
+  "line_greeting": null,
+  "memory_config": {
+    "enabled": true,
+    "scope": "both",
+    "include_other_conversation_context": false,
+    "instructions": null
+  },
+  "voice_config": {
+    "voice_id": null
+  },
+  "emails_settings": null,
+  "allow_anonymous_access": false,
+  "name": "task_manager"
+}

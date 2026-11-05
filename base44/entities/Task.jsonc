@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "name": "Task",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Task title"
+    },
+    "completed": {
+      "type": "boolean",
+      "description": "Whether the task is completed",
+      "default": false
+    }
+  },
+  "required": [
+    "title"
+  ]
+}
