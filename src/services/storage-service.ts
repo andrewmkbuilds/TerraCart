@@ -40,6 +40,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   floatingLauncher: true,
   reduceMotion: false,
   compactMode: false,
+  theme: 'light',
   saveHistory: true,
   cloudSync: false,
   onboarded: false,

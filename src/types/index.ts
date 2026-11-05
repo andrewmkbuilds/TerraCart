@@ -242,6 +242,7 @@ export interface Preferences {
   floatingLauncher: boolean
   reduceMotion: boolean
   compactMode: boolean
+  theme: 'light' | 'dark' | 'system'
   saveHistory: boolean
   cloudSync: boolean
   onboarded: boolean
