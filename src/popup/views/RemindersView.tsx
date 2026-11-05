@@ -6,7 +6,7 @@ import ViewHeader from '../components/ViewHeader'
 import { WEEKDAY_LABELS } from '../../services/reminders-service'
 import { MSG } from '../../utils/messages'
 import { send } from '../../utils/messaging'
-import { storage, DEFAULT_PREFERENCES } from '../../services/storage-service'
+import { storage } from '../../services/storage-service'
 
 interface Props {
   data: PopupData
@@ -73,7 +73,7 @@ export default function RemindersView({ data, onBack }: Props) {
       await Notification.requestPermission()
     }
     const preferences = { ...(await storage.getPreferences()), notificationsEnabled: true }
-    await send(MSG.SAVE_PREFERENCES, { preferences: preferences || DEFAULT_PREFERENCES })
+    await send(MSG.SAVE_PREFERENCES, { preferences })
     await data.refresh()
   }
 

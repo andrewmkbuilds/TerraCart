@@ -23,7 +23,7 @@ export default function Popup() {
   const back = () => setView('home')
 
   return (
-    <div className="flex min-h-[420px] flex-col bg-canvas">
+    <div className="flex min-h-[420px] w-[360px] flex-col bg-canvas">
       <header className="flex items-center justify-between border-b border-line px-4 py-2.5">
         <button onClick={back} className="flex items-center gap-2 text-left">
           <span className="grid h-7 w-7 place-items-center rounded-lg bg-forest text-canvas">

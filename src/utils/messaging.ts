@@ -87,5 +87,5 @@ export function openSettings(): void {
     void chrome.runtime.openOptionsPage()
     return
   }
-  window.open('?view=settings', '_blank', 'noopener')
+  window.dispatchEvent(new CustomEvent('terracart:open-settings'))
 }

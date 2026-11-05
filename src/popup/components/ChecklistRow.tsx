@@ -14,7 +14,7 @@ export default function ChecklistRow({ item, onToggle, onDelete }: Props) {
       <button
         onClick={() => onToggle(item)}
         aria-label={item.purchased ? 'Mark as not purchased' : 'Mark as purchased'}
-        className={`mt-0.5 grid h-4.5 w-4.5 shrink-0 place-items-center rounded-md border transition-colors ${
+        className={`mt-0.5 grid shrink-0 place-items-center rounded-md border transition-colors ${
           item.purchased ? 'border-forest bg-forest text-canvas' : 'border-line text-transparent hover:border-forest-soft'
         }`}
         style={{ height: 18, width: 18 }}

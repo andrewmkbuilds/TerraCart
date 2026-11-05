@@ -17,7 +17,7 @@ interface Props {
 export default function ChecklistView({ data, onBack }: Props) {
   const [adding, setAdding] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ name: '', category: 'household', quantity: 1, reusable: false })
+  const [form, setForm] = useState({ name: '', category: 'Household', quantity: 1, reusable: false })
 
   const openItems = data.checklist.filter((item) => !item.purchased)
   const doneItems = data.checklist.filter((item) => item.purchased)
@@ -99,8 +99,8 @@ export default function ChecklistView({ data, onBack }: Props) {
                 className="field flex-1"
               >
                 {CHECKLIST_CATEGORIES.map((entry) => (
-                  <option key={entry.key} value={entry.key}>
-                    {entry.label}
+                  <option key={entry} value={entry}>
+                    {entry}
                   </option>
                 ))}
               </select>
