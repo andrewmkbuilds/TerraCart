@@ -93,7 +93,7 @@ const ARCHETYPES: Archetype[] = [
   {
     id: 'bags',
     category: 'household',
-    match: /shopping bag|carrier bag|tote|\bbags?\b|grocery bag/,
+    match: /shopping bag|carrier bag|tote bag|grocery bag|reusable bag|produce bag/,
     suggestions: [
       { title: 'Organic cotton tote bag', material: 'Organic cotton', reason: 'Reusable for years if you actually carry it every trip.', reusable: true, plasticFree: true, materialScore: 72, query: 'organic cotton reusable shopping bag' },
       { title: 'Recycled cotton mesh produce bags', material: 'Recycled cotton', reason: 'Replaces thin single-use produce bags.', reusable: true, plasticFree: true, materialScore: 74, query: 'reusable cotton produce bags' },
