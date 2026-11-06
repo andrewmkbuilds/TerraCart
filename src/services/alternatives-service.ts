@@ -167,7 +167,7 @@ const ARCHETYPES: Archetype[] = [
   {
     id: 'stationery',
     category: 'stationery',
-    match: /pen|pencil|notebook|notepad|marker|highlighter|stationery/,
+    match: /\b(pens?|pencils?|notebook|notepad|markers?|highlighter|stationery)\b/,
     suggestions: [
       { title: 'Refillable fountain or rollerball pen', material: 'Metal / refillable', reason: 'A refillable body replaces many disposable pens.', reusable: true, plasticFree: true, materialScore: 74, query: 'refillable metal fountain pen' },
       { title: 'Recycled paper notebook', material: 'Recycled paper', reason: 'Recycled content with paper binding instead of plastic.', reusable: false, plasticFree: true, materialScore: 68, query: 'recycled paper notebook' },
@@ -177,7 +177,7 @@ const ARCHETYPES: Archetype[] = [
   {
     id: 'clothing',
     category: 'clothing',
-    match: /shirt|t-shirt|tee|dress|jeans|trousers|jacket|hoodie|leggings|socks|clothing|apparel/,
+    match: /\b(shirts?|t-shirts?|tees?|dress|jeans|trousers?|jackets?|hoodies?|leggings|socks?|clothing|apparel)\b/,
     suggestions: [
       { title: 'Organic cotton basics', material: 'Organic cotton', reason: 'Certified organic fibre with clearer supply chains.', reusable: true, plasticFree: true, materialScore: 72, query: 'organic cotton gots certified t-shirt' },
       { title: 'Linen or hemp garment', material: 'Linen / hemp', reason: 'Lower-input fibres that last many seasons.', reusable: true, plasticFree: true, materialScore: 74, query: 'linen hemp clothing' },
@@ -197,7 +197,7 @@ const ARCHETYPES: Archetype[] = [
   {
     id: 'drinkware',
     category: 'kitchen',
-    match: /mug|tumbler|cup|glass set|flask/,
+    match: /\b(mugs?|tumblers?|cups?|glass set|flasks?)\b/,
     suggestions: [
       { title: 'Ceramic mug', material: 'Ceramic', reason: 'Durable, plastic-free and long-lived with care.', reusable: true, plasticFree: true, materialScore: 74, query: 'ceramic mug handmade' },
       { title: 'Double-walled glass tumbler', material: 'Borosilicate glass', reason: 'Recyclable and free of plastic lining.', reusable: true, plasticFree: true, materialScore: 78, query: 'double walled glass tumbler' },

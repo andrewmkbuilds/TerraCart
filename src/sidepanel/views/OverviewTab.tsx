@@ -92,7 +92,7 @@ export default function OverviewTab({ analysis }: { analysis: ProductAnalysis })
         </div>
 
         {score.overall === null && (
-          <div className="mt-3 rounded-xl bg-amber/10 px-3 py-2">
+          <div className="mt-3 rounded-xl bg-amber-tint px-3 py-2">
             <p className="text-[11px] font-semibold text-amber">Not enough evidence for a score</p>
             <p className="mt-0.5 text-[10.5px] leading-relaxed text-amber/90">
               This page does not state anything TerraCart can score. Rather than guess, it shows what is missing.
@@ -255,7 +255,7 @@ export default function OverviewTab({ analysis }: { analysis: ProductAnalysis })
         </dl>
 
         {score.unverifiedClaims.length > 0 && (
-          <p className="mt-2.5 rounded-lg bg-amber/10 px-2.5 py-2 text-[10.5px] leading-relaxed text-amber">
+          <p className="mt-2.5 rounded-lg bg-amber-tint px-2.5 py-2 text-[10.5px] leading-relaxed text-amber">
             Marketing claims without evidence: {score.unverifiedClaims.join(', ')}.
           </p>
         )}

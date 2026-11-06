@@ -8,6 +8,7 @@
     "dev": "vite build --watch",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "server": "node server/research-server.mjs",
     "base44:help": "base44 --help"
   },

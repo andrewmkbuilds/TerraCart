@@ -14,6 +14,7 @@ export default {
         mint: 'var(--mint)',
         clay: 'var(--clay)',
         amber: 'var(--amber)',
+        'amber-tint': 'var(--amber-tint)',
         forest: {
           DEFAULT: 'var(--forest)',
           soft: 'var(--forest-soft)',

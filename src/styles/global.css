@@ -15,6 +15,7 @@
   --sand: #edeae1;
   --clay: #b5543f;
   --amber: #b5822a;
+  --amber-tint: rgba(181, 130, 42, 0.1);
   --line: rgba(18, 48, 38, 0.12);
   --shadow: 0 18px 44px -26px rgba(10, 31, 25, 0.4);
 }
@@ -32,6 +33,7 @@ html.theme-dark {
   --sand: #22362c;
   --clay: #e08a72;
   --amber: #dfb163;
+  --amber-tint: rgba(223, 177, 99, 0.14);
   --line: rgba(233, 241, 236, 0.14);
   --shadow: 0 18px 44px -26px rgba(0, 0, 0, 0.75);
 }
